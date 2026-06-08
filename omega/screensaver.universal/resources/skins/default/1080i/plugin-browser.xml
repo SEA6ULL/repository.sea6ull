@@ -1,0 +1,145 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<window type="dialog" id="1101">
+    <defaultcontrol always="true">50</defaultcontrol>
+    <controls>
+
+        <!-- Dark overlay background -->
+        <control type="image">
+            <left>0</left><top>0</top>
+            <width>1920</width><height>1080</height>
+            <texture colordiffuse="CC000000">screensaver-black.png</texture>
+        </control>
+
+        <!-- Dialog panel -->
+        <control type="group">
+            <left>200</left><top>80</top>
+            <width>1520</width><height>920</height>
+
+            <!-- Panel background -->
+            <control type="image">
+                <left>0</left><top>0</top>
+                <width>1520</width><height>920</height>
+                <texture colordiffuse="E6111111">screensaver-black.png</texture>
+            </control>
+
+            <!-- Heading label (id 54) -->
+            <control type="label" id="54">
+                <left>40</left><top>28</top>
+                <width>1440</width><height>56</height>
+                <label>Browse Video Plugin</label>
+                <font>font20</font>
+                <textcolor>FFFFFFFF</textcolor>
+                <aligny>center</aligny>
+            </control>
+
+            <!-- Divider -->
+            <control type="image">
+                <left>40</left><top>88</top>
+                <width>1440</width><height>2</height>
+                <texture colordiffuse="80FFFFFF">screensaver-black.png</texture>
+            </control>
+
+            <!-- Current path label (id 53) -->
+            <control type="label" id="53">
+                <left>40</left><top>96</top>
+                <width>1440</width><height>40</height>
+                <label>Video Plugins</label>
+                <font>font12</font>
+                <textcolor>FF888888</textcolor>
+                <aligny>center</aligny>
+            </control>
+
+            <!-- Directory list (id 50) -->
+            <control type="list" id="50">
+                <left>40</left><top>144</top>
+                <width>1440</width><height>640</height>
+                <onup>51</onup>
+                <ondown>51</ondown>
+                <itemlayout height="56">
+                    <control type="label">
+                        <left>16</left><top>0</top>
+                        <width>1340</width><height>56</height>
+                        <info>ListItem.Label</info>
+                        <font>font14</font>
+                        <textcolor>FFDDDDDD</textcolor>
+                        <selectedcolor>FFFFFFFF</selectedcolor>
+                        <aligny>center</aligny>
+                    </control>
+                    <control type="label">
+                        <left>1380</left><top>0</top>
+                        <width>60</width><height>56</height>
+                        <info>ListItem.Label2</info>
+                        <font>font14</font>
+                        <textcolor>FF888888</textcolor>
+                        <selectedcolor>FFAAAAAA</selectedcolor>
+                        <aligny>center</aligny>
+                        <align>right</align>
+                    </control>
+                </itemlayout>
+                <focusedlayout height="56">
+                    <control type="image">
+                        <left>0</left><top>4</top>
+                        <width>1440</width><height>48</height>
+                        <texture colordiffuse="401464F5">screensaver-black.png</texture>
+                    </control>
+                    <control type="label">
+                        <left>16</left><top>0</top>
+                        <width>1340</width><height>56</height>
+                        <info>ListItem.Label</info>
+                        <font>font14</font>
+                        <textcolor>FFFFFFFF</textcolor>
+                        <selectedcolor>FFFFFFFF</selectedcolor>
+                        <aligny>center</aligny>
+                    </control>
+                    <control type="label">
+                        <left>1380</left><top>0</top>
+                        <width>60</width><height>56</height>
+                        <info>ListItem.Label2</info>
+                        <font>font14</font>
+                        <textcolor>FFAAAAAA</textcolor>
+                        <selectedcolor>FFAAAAAA</selectedcolor>
+                        <aligny>center</aligny>
+                        <align>right</align>
+                    </control>
+                </focusedlayout>
+            </control>
+
+            <!-- Divider -->
+            <control type="image">
+                <left>40</left><top>792</top>
+                <width>1440</width><height>2</height>
+                <texture colordiffuse="80FFFFFF">screensaver-black.png</texture>
+            </control>
+
+            <!-- Back button (id 52) -->
+            <control type="button" id="52">
+                <left>40</left><top>804</top>
+                <width>240</width><height>68</height>
+                <onright>51</onright>
+                <onleft>50</onleft>
+                <onup>50</onup>
+                <label>← Back</label>
+                <font>font14</font>
+                <textcolor>FFDDDDDD</textcolor>
+                <focusedcolor>FFFFFFFF</focusedcolor>
+                <texturefocus colordiffuse="801464F5">screensaver-black.png</texturefocus>
+                <texturenofocus colordiffuse="60333333">screensaver-black.png</texturenofocus>
+            </control>
+
+            <!-- Use This Folder button (id 51) -->
+            <control type="button" id="51">
+                <left>1080</left><top>804</top>
+                <width>400</width><height>68</height>
+                <onleft>52</onleft>
+                <onup>50</onup>
+                <label>✓ Use This Folder</label>
+                <font>font14</font>
+                <textcolor>FFDDDDDD</textcolor>
+                <focusedcolor>FFFFFFFF</focusedcolor>
+                <texturefocus colordiffuse="C01464F5">screensaver-black.png</texturefocus>
+                <texturenofocus colordiffuse="60333333">screensaver-black.png</texturenofocus>
+            </control>
+
+        </control>
+    </controls>
+</window>

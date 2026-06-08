@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<addons>
+<addon id="plugin.program.sea6ullwiz" name="SEA6ULL Wizard" version="1.0.0" provider-name="SEA6ULL">
+	<requires>
+		<import addon="xbmc.python" version="3.0.1"/>
+		<import addon="script.module.requests"/>
+	</requires>
+	<extension point="xbmc.python.pluginsource" library="addon.py">
+		<provides>executable</provides>
+	</extension>
+	<extension point="xbmc.service" library="service.py" />
+	<extension point="xbmc.addon.metadata">
+		<summary lang="en_GB">SEA6ULL Wizard</summary>
+		<description lang="en_GB">Kodi Build and Maintenance Wizard</description>
+		<disclaimer lang="en_GB">This Addon contains no content</disclaimer>
+		<language>en</language>
+		<platform>all</platform>
+		<license>GPL-2.0-or-later</license>
+		<forum></forum>
+		<website></website>
+		<email></email>
+		<source></source>
+		<news></news>
+		<assets>
+			<icon>icon.png</icon>
+			<fanart>fanart.jpg</fanart>
+		</assets>
+	</extension>
+</addon>
+
+<addon id="repository.sea6ull" name="SEA6ULL Repository" version="1.0.0" provider-name="SEA6ULL">
+    <extension point="xbmc.addon.repository" name="SEA6ULL Repository">
+        <dir>
+            <info compressed="false">https://raw.githubusercontent.com/SEA6ULL/repository.sea6ull/master/zips/omega/addons.xml</info>
+            <checksum>https://raw.githubusercontent.com/SEA6ULL/repository.sea6ull/master/zips/omega/addons.xml.md5</checksum>
+            <datadir zip="true">https://raw.githubusercontent.com/SEA6ULL/repository.sea6ull/master/zips/omega/</datadir>
+        </dir>
+    </extension>
+    <extension point="xbmc.addon.metadata">
+        <summary>SEA6ULL Repository</summary>
+        <description>The official SEA6ULL Kodi Repository. Home of SEA6ULL Wizard and other addons.</description>
+        <platform>all</platform>
+        <license>GPL-2.0-only</license>
+        <assets>
+            <icon>icon.png</icon>
+            <fanart>fanart.jpg</fanart>
+        </assets>
+        <source>https://github.com/SEA6ULL/repository.sea6ull</source>
+    </extension>
+</addon>
+
+<addon id="screensaver.universal" name="Universal Screensaver" version="1.0.0" provider-name="Sea6ull">
+	<requires>
+		<import addon="xbmc.python" version="3.0.1" />
+		<import addon="script.module.exifread" version="2.1.2+matrix.0" />
+		<import addon="script.module.iptcinfo3" version="2.1.4+matrix.1" />
+	</requires>
+	<extension point="xbmc.ui.screensaver" library="default.py" />
+	<extension point="xbmc.python.script" library="default.py" />
+	<extension point="xbmc.service" library="service.py" start="startup" />
+	<extension point="xbmc.addon.metadata">
+		<summary lang="en_GB">Universal Screensaver with video plugin source support</summary>
+		<summary lang="en_US">Universal Screensaver with video plugin source support</summary>
+		<description lang="en_GB">The Universal Screensaver displays a slideshow of images using various transition effects. Sources include video fanart, music fanart, a custom image folder, or a video plugin path. Plugin images are cached locally.</description>
+		<description lang="en_US">The Universal Screensaver displays a slideshow of images using various transition effects. Sources include video fanart, music fanart, a custom image folder, or a video plugin path. Plugin images are cached locally.</description>
+		<platform>all</platform>
+		<license>GPL-2.0-only</license>
+		<assets>
+			<icon>resources/icon.png</icon>
+			<fanart>resources/fanart.jpg</fanart>
+		</assets>
+		<news>- Universal Screensaver: adds video plugin source with image cache</news>
+	</extension>
+</addon>
+</addons>

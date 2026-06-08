@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<addon id="repository.sea6ull" name="SEA6ULL Repository" version="1.0.0" provider-name="SEA6ULL">
+    <extension point="xbmc.addon.repository" name="SEA6ULL Repository">
+        <dir>
+            <info compressed="false">https://raw.githubusercontent.com/SEA6ULL/repository.sea6ull/master/zips/piers/addons.xml</info>
+            <checksum>https://raw.githubusercontent.com/SEA6ULL/repository.sea6ull/master/zips/piers/addons.xml.md5</checksum>
+            <datadir zip="true">https://raw.githubusercontent.com/SEA6ULL/repository.sea6ull/master/zips/piers/</datadir>
+        </dir>
+    </extension>
+    <extension point="xbmc.addon.metadata">
+        <summary>SEA6ULL Repository</summary>
+        <description>The official SEA6ULL Kodi Repository. Home of SEA6ULL Wizard and other addons.</description>
+        <platform>all</platform>
+        <license>GPL-2.0-only</license>
+        <assets>
+            <icon>icon.png</icon>
+            <fanart>fanart.jpg</fanart>
+        </assets>
+        <source>https://github.com/SEA6ULL/repository.sea6ull</source>
+    </extension>
+</addon>

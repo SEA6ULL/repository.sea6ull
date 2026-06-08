@@ -1,0 +1,188 @@
+# Kodi Media Center language file
+# Addon Name: Universal Screensaver
+# Addon id: screensaver.universal
+# Addon Provider: Custom
+msgid ""
+msgstr ""
+"Project-Id-Version: XBMC Addons\n"
+"Language: en_US\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+msgctxt "Addon Summary"
+msgid "Universal Screensaver with video plugin source support"
+msgstr "Universal Screensaver with video plugin source support"
+
+msgctxt "Addon Description"
+msgid "The Universal Screensaver displays a slideshow of images using various transition effects. Sources include video fanart, music fanart, a custom image folder, or a video plugin path. Plugin images are cached locally at 1080p 16:9."
+msgstr "The Universal Screensaver displays a slideshow of images using various transition effects. Sources include video fanart, music fanart, a custom image folder, or a video plugin path. Plugin images are cached locally at 1080p 16:9."
+
+msgctxt "#30000"
+msgid "Source of slideshow images"
+msgstr "Source of slideshow images"
+
+msgctxt "#30001"
+msgid "Folder"
+msgstr "Folder"
+
+msgctxt "#30002"
+msgid "Video Fanart"
+msgstr "Video Fanart"
+
+msgctxt "#30003"
+msgid "Music Fanart"
+msgstr "Music Fanart"
+
+msgctxt "#30004"
+msgid "Image Folder"
+msgstr "Image Folder"
+
+msgctxt "#30005"
+msgid "Dim level"
+msgstr "Dim level"
+
+msgctxt "#30006"
+msgid "Effect"
+msgstr "Effect"
+
+msgctxt "#30007"
+msgid "Slide"
+msgstr "Slide"
+
+msgctxt "#30008"
+msgid "Crossfade"
+msgstr "Crossfade"
+
+msgctxt "#30009"
+msgid "Pan and zoom"
+msgstr "Pan and zoom"
+
+msgctxt "#30010"
+msgid "Amount of seconds to display each image"
+msgstr "Amount of seconds to display each image"
+
+msgctxt "#30011"
+msgid "Scale images fullscreen"
+msgstr "Scale images fullscreen"
+
+msgctxt "#30012"
+msgid "Display image name"
+msgstr "Display image name"
+
+msgctxt "#30013"
+msgid "Disabled"
+msgstr "Disabled"
+
+msgctxt "#30014"
+msgid "Use filename"
+msgstr "Use filename"
+
+msgctxt "#30015"
+msgid "Use foldername"
+msgstr "Use foldername"
+
+msgctxt "#30016"
+msgid "Display images in random order"
+msgstr "Display images in random order"
+
+msgctxt "#30017"
+msgid "Use full path"
+msgstr "Use full path"
+
+msgctxt "#30018"
+msgid "Use folder- and filename"
+msgstr "Use folder- and filename"
+
+msgctxt "#30021"
+msgid "Display picture date"
+msgstr "Display picture date"
+
+msgctxt "#30022"
+msgid "Display additional picture tags"
+msgstr "Display additional picture tags"
+
+msgctxt "#30023"
+msgid "Display music info during audio playback"
+msgstr "Display music info during audio playback"
+
+msgctxt "#30024"
+msgid "Basic"
+msgstr "Basic"
+
+msgctxt "#30025"
+msgid "Additional"
+msgstr "Additional"
+
+msgctxt "#30026"
+msgid "Resume slideshow from last position"
+msgstr "Resume slideshow from last position"
+
+msgctxt "#30029"
+msgid "Display background picture"
+msgstr "Display background picture"
+
+msgctxt "#30030"
+msgid "Use vignette overlay"
+msgstr "Use vignette overlay"
+
+msgctxt "#30040"
+msgid "Video Plugin"
+msgstr "Video Plugin"
+
+msgctxt "#30041"
+msgid "Video Plugin (toggle on and press OK to select path)"
+msgstr "Video Plugin (toggle on and press OK to select path)"
+
+msgctxt "#30042"
+msgid "Browse your installed video plugins to choose a folder as the image source"
+msgstr "Browse your installed video plugins to choose a folder as the image source"
+
+msgctxt "#30050"
+msgid "Plugin Cache"
+msgstr "Plugin Cache"
+
+msgctxt "#30051"
+msgid "Number of images to cache"
+msgstr "Number of images to cache"
+
+msgctxt "#30052"
+msgid "Maximum number of 1080p 16:9 fanart images to download and cache from the video plugin"
+msgstr "Maximum number of 1080p 16:9 fanart images to download and cache from the video plugin"
+
+msgctxt "#30053"
+msgid "Rebuild cache now"
+msgstr "Rebuild cache now"
+
+msgctxt "#30054"
+msgid "Immediately clears and rebuilds the plugin image cache"
+msgstr "Immediately clears and rebuilds the plugin image cache"
+
+msgctxt "#30055"
+msgid "Cache rebuild started"
+msgstr "Cache rebuild started"
+
+msgctxt "#30056"
+msgid "Cache rebuild complete"
+msgstr "Cache rebuild complete"
+
+msgctxt "#30060"
+msgid "Video Plugins"
+msgstr "Video Plugins"
+
+msgctxt "#30043"
+msgid "Plugin path"
+msgstr "Plugin path"
+
+msgctxt "#30044"
+msgid "Plugin path"
+msgstr "Plugin path"
+
+msgctxt "#30061"
+msgid "Show clearlogo overlay"
+msgstr "Show clearlogo overlay"
+
+msgctxt "#30062"
+msgid "Display the movie/show clearlogo in the lower left corner during the slideshow (Video Plugin source only)"
+msgstr "Display the movie/show clearlogo in the lower left corner during the slideshow (Video Plugin source only)"

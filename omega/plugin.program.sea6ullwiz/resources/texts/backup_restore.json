@@ -1,0 +1,32 @@
+{
+    "favourites.xml": {
+        "name": "Kodi_Favourites",
+        "setting": "savefavs",
+        "path": "user_path"
+    },
+    "advancedsettings.xml": {
+        "name": "Kodi_AdvancedSettings",
+        "setting": "saveadvanced",
+        "path": "user_path"
+    },
+    "sources.xml": {
+        "name": "Kodi_Sources",
+        "setting": "savesources",
+        "path": "user_path"
+    },
+    "script.module.accountmgr": {
+        "name": "Account Manager",
+        "setting": "savedata",
+        "path": "data_path"
+    },
+    "plugin.video.imdb.trailers": {
+        "name": "IMDb Trailers",
+        "setting": "savedata",
+        "path": "data_path"
+    },
+    "plugin.video.youtube": {
+        "name": "YouTube",
+        "setting": "saveyoutube",
+        "path": "data_path"
+    }
+}

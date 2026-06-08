@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<addon id="screensaver.universal" name="Universal Screensaver" version="1.0.0" provider-name="Sea6ull">
+	<requires>
+		<import addon="xbmc.python" version="3.0.1" />
+		<import addon="script.module.exifread" version="2.1.2+matrix.0" />
+		<import addon="script.module.iptcinfo3" version="2.1.4+matrix.1" />
+	</requires>
+	<extension point="xbmc.ui.screensaver" library="default.py" />
+	<extension point="xbmc.python.script" library="default.py" />
+	<extension point="xbmc.service" library="service.py" start="startup" />
+	<extension point="xbmc.addon.metadata">
+		<summary lang="en_GB">Universal Screensaver with video plugin source support</summary>
+		<summary lang="en_US">Universal Screensaver with video plugin source support</summary>
+		<description lang="en_GB">The Universal Screensaver displays a slideshow of images using various transition effects. Sources include video fanart, music fanart, a custom image folder, or a video plugin path. Plugin images are cached locally.</description>
+		<description lang="en_US">The Universal Screensaver displays a slideshow of images using various transition effects. Sources include video fanart, music fanart, a custom image folder, or a video plugin path. Plugin images are cached locally.</description>
+		<platform>all</platform>
+		<license>GPL-2.0-only</license>
+		<assets>
+			<icon>resources/icon.png</icon>
+			<fanart>resources/fanart.jpg</fanart>
+		</assets>
+		<news>- Universal Screensaver: adds video plugin source with image cache</news>
+	</extension>
+</addon>
