@@ -30,7 +30,7 @@
 
 <addon id="repository.sea6ull" name="SEA6ULL Repository" version="1.0.0" provider-name="SEA6ULL">
     <extension point="xbmc.addon.repository" name="SEA6ULL Repository">
-        <dir>
+        <dir minversion="21.0.0">
             <info compressed="false">https://raw.githubusercontent.com/SEA6ULL/repository.sea6ull/master/zips/omega/addons.xml</info>
             <checksum>https://raw.githubusercontent.com/SEA6ULL/repository.sea6ull/master/zips/omega/addons.xml.md5</checksum>
             <datadir zip="true">https://raw.githubusercontent.com/SEA6ULL/repository.sea6ull/master/zips/omega/</datadir>
