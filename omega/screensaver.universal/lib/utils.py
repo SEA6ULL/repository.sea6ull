@@ -234,6 +234,14 @@ def _get_image_dimensions(local_path):
     return 0, 0
 
 
+def _url_hash(url):
+    """Stable short hash of a source URL, used to name its cached file.
+    The same URL always yields the same filename across runs, so images keep a
+    consistent on-disk identity and the prune step can reliably match them.
+    """
+    return hashlib.md5(url.encode('utf-8')).hexdigest()
+
+
 def _clear_plugin_cache(full=True):
     """Remove cached plugin images and index.
     If full=False, only remove images that are no longer needed (called during smart refresh).
@@ -404,25 +412,39 @@ def build_plugin_cache(plugin_path, cache_size, startup_delay=True):
 
     cached_pairs = []
     new_url_map  = {}   # build fresh map from this run's results
-    img_index    = 0
+    seen_fanart  = set()   # guard against the same fanart URL appearing twice
 
     for fanart_url, logo_url, label in pairs:
         if len(cached_pairs) >= cache_size:
             break
 
-        img_index += 1
+        # Skip duplicate source URLs within a single crawl so we never cache
+        # the same image twice under two different names.
+        if fanart_url in seen_fanart:
+            continue
+        seen_fanart.add(fanart_url)
 
         # --- Fanart: reuse if already cached, else download ---
+        # Filename is derived from a hash of the source URL so the same image
+        # always maps to the same file on disk across runs. This keeps identity
+        # stable, makes reuse reliable, and lets the prune step below actually
+        # find and remove files that are no longer needed.
         ext = os.path.splitext(fanart_url.split('?')[0])[1].lower()
         if ext not in ('.jpg', '.jpeg', '.png', '.webp'):
             ext = '.jpg'
-        fanart_file = 'fanart_%05d%s' % (img_index, ext)
+        fanart_file = 'fanart_%s%s' % (_url_hash(fanart_url), ext)
         fanart_dest = os.path.join(PLUGIN_FANARTDIR, fanart_file)
 
+        reused_fanart = False
         if fanart_url in url_map and os.path.exists(url_map[fanart_url]):
             # Already have this image — reuse it
             fanart_dest = url_map[fanart_url]
+            reused_fanart = True
             log('reusing fanart: %s' % os.path.basename(fanart_dest))
+        elif os.path.exists(fanart_dest):
+            # File already on disk from a previous run (stable name) — reuse it
+            reused_fanart = True
+            log('reusing fanart (on disk): %s' % os.path.basename(fanart_dest))
         else:
             ok, nbytes = download_url(fanart_url, fanart_dest)
             if not ok:
@@ -430,12 +452,12 @@ def build_plugin_cache(plugin_path, cache_size, startup_delay=True):
             log('downloaded %d bytes -> %s' % (nbytes, fanart_file))
 
         w, h = _get_image_dimensions(fanart_dest)
-        log('fanart_%05d: %dx%d %s' % (img_index, w, h, label[:30]))
+        log('fanart %s: %dx%d %s' % (os.path.basename(fanart_dest), w, h, label[:30]))
 
         if not _is_hq_16x9(w, h):
-            log('discarding fanart_%05d - %dx%d not HQ 16:9' % (img_index, w, h))
+            log('discarding %s - %dx%d not HQ 16:9' % (os.path.basename(fanart_dest), w, h))
             # Only delete if we just downloaded it (not a reused file)
-            if fanart_url not in url_map:
+            if not reused_fanart:
                 try:
                     os.remove(fanart_dest)
                 except Exception:
@@ -450,12 +472,15 @@ def build_plugin_cache(plugin_path, cache_size, startup_delay=True):
             ext2 = os.path.splitext(logo_url.split('?')[0])[1].lower()
             if ext2 not in ('.jpg', '.jpeg', '.png', '.webp'):
                 ext2 = '.png'
-            logo_file = 'logo_%05d%s' % (img_index, ext2)
+            logo_file = 'logo_%s%s' % (_url_hash(logo_url), ext2)
             logo_dest_new = os.path.join(PLUGIN_LOGODIR, logo_file)
 
             if logo_url in url_map and os.path.exists(url_map[logo_url]):
                 logo_dest = url_map[logo_url]
                 log('reusing logo: %s' % os.path.basename(logo_dest))
+            elif os.path.exists(logo_dest_new):
+                logo_dest = logo_dest_new
+                log('reusing logo (on disk): %s' % os.path.basename(logo_dest))
             else:
                 ok2, nbytes2 = download_url(logo_url, logo_dest_new)
                 if ok2:
@@ -466,7 +491,7 @@ def build_plugin_cache(plugin_path, cache_size, startup_delay=True):
                 new_url_map[logo_url] = logo_dest
 
         cached_pairs.append([fanart_dest, logo_dest, label])
-        log('PAIR CACHED %d: %s' % (img_index, label[:30]))
+        log('PAIR CACHED %d: %s' % (len(cached_pairs), label[:30]))
 
     # Delete files from old url_map that are no longer needed
     needed = set(new_url_map.values())
@@ -477,6 +502,23 @@ def build_plugin_cache(plugin_path, cache_size, startup_delay=True):
                 log('removed stale: %s' % os.path.basename(old_path))
             except Exception:
                 pass
+
+    # Sweep the image folders for any orphaned files that aren't part of the
+    # new cache. This catches leftovers from older builds (e.g. when shrinking
+    # the cache size from 100 to 10) that the URL map no longer references.
+    for folder in (PLUGIN_FANARTDIR, PLUGIN_LOGODIR):
+        if os.path.isdir(folder):
+            try:
+                for fname in os.listdir(folder):
+                    fpath = os.path.join(folder, fname)
+                    if fpath not in needed and os.path.isfile(fpath):
+                        try:
+                            os.remove(fpath)
+                            log('removed orphan: %s' % fname)
+                        except Exception:
+                            pass
+            except Exception as e:
+                log('orphan sweep failed for %s: %s' % (folder, str(e)))
 
     # Save updated URL map
     try:

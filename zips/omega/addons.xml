@@ -49,7 +49,7 @@
     </extension>
 </addon>
 
-<addon id="screensaver.universal" name="Universal Screensaver" version="1.0.0" provider-name="Sea6ull">
+<addon id="screensaver.universal" name="Universal Screensaver" version="1.0.1" provider-name="Sea6ull">
 	<requires>
 		<import addon="xbmc.python" version="3.0.1" />
 		<import addon="script.module.exifread" version="2.1.2+matrix.0" />

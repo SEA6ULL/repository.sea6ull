@@ -187,9 +187,9 @@
 			<group id="2">
 				<setting help="30054" id="rebuild_cache" label="30053" type="action">
 					<level>0</level>
-					<default/>
+					<data>RunScript(screensaver.universal,rebuild_cache)</data>
 					<control format="action" type="button">
-						<action>RunScript(screensaver.universal,rebuild_cache)</action>
+						<close>true</close>
 					</control>
 				</setting>
 			</group>

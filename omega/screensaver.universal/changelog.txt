@@ -1,2 +1,11 @@
+v1.0.1
+- "Rebuild Cache Now" now works when pressed (the button action was previously ignored)
+- Rebuild Cache Now applies a just-changed cache size on the first press, with no need to exit and re-enter settings
+- Rebuild Cache Now does a full cache wipe before rebuilding, so the cache is never left with a mix of old and new images
+- Cached image filenames are now stable (URL-based), eliminating duplicate images and mismatched fanart/logo pairs
+- Shrinking the cache size now correctly removes the excess images
+- Rebuild now shows start/complete notifications and reports errors instead of failing silently
+- In-place updates installed while Kodi is running now take effect immediately
+
 v1.0.0
 - initial release
