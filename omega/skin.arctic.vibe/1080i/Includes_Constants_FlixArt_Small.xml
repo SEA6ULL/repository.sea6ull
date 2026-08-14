@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<includes>
+
+    <!-- SKINMOD: Background Style "Small".
+         Included only when Skin.String(Skin.FlixArt.Size) equals Small.
+         This was the old "Standard" size (the previous default).
+         16:9 preserved: 1529 / 860 = 1.7779. -->
+    <constant name="flixart_size_w">1529</constant>
+    <constant name="flixart_size_h">860</constant>
+
+</includes>

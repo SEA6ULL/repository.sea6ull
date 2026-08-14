@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<window>
+    <zorder>1000</zorder>
+    <controls>
+
+        <!-- SKINMOD: "+ !Window.IsVisible(1123)" suppresses this spinner while the trailer dialog is
+             open. Custom_1123_Dialog_Trailer.xml draws its own centred spinner + trailer title on the
+             black loading cover, and Kodi raises this busy dialog at the same time while it resolves
+             the YouTube URL, so both appeared at once - this one in the top right corner.
+             Scoped to window 1123 only: everywhere else Kodi's busy indicator is untouched. This is
+             the right place for the fix because the whole Furniture_Busy group is gated on this one
+             "visible" param, so nothing else in the skin's busy furniture is affected. -->
+        <include content="Furniture_Busy">
+            <param name="hasspinner">true</param>
+            <param name="spinspinner">true</param>
+            <param name="icon">special://skin/extras/icons/kodi.png</param>
+            <param name="haslabel">false</param>
+            <param name="visible">[!Window.IsActive(DialogExtendedProgressBar.xml) | [Window.IsActive(fullscreenvideo) | Window.IsActive(visualisation)]] + [!Window.IsActive(DialogVolumeBar.xml) | Player.Muted] + !Window.IsVisible(1123)</param>
+            <param name="visible_condition">!$EXP[Exp_FurnitureBusy_AnimationCond_DialogBusy]</param>
+            <param name="windowopen_condition">!$EXP[Exp_FurnitureBusy_AnimationCond_DialogBusy]</param>
+        </include>
+
+        <control type="progress" id="10">
+            <include>Object_Hidden_Button_Definition</include>
+        </control>
+
+    </controls>
+</window>

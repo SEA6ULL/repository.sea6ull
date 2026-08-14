@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<includes>
+
+    <!--
+        SKINMOD: Spotlight has been removed from this skin mod.
+        The include names below are kept as empty stubs so that any residual
+        reference elsewhere still resolves at skin load instead of erroring.
+        All Spotlight render paths are gated off by constant-false conditions.
+    -->
+
+    <include name="Spotlight_Fallback_Slideshow" />
+    <include name="Spotlight_Info" />
+
+    <include name="Spotlight_List">
+        <param name="window_id" />
+        <param name="property_window_id" />
+        <param name="sortby" />
+        <param name="sortorder" />
+        <param name="target" />
+        <param name="limit" />
+        <param name="browse" />
+        <param name="content" />
+        <definition />
+    </include>
+
+    <include name="Spotlight_Main_Button_Standard" />
+
+    <include name="Spotlight_Main">
+        <param name="window_id" />
+        <param name="property_window_id" />
+        <definition />
+    </include>
+
+</includes>

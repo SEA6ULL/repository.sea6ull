@@ -1,0 +1,172 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<window type="dialog" id="1123">
+
+    <defaultcontrol always="true">9000</defaultcontrol>
+    <onload condition="String.IsEmpty(Window(Home).Property(PlayTrailer))">Close</onload>
+    <onload condition="String.IsEmpty(Window(Home).Property(PlayTrailerTitle))">SetProperty(PlayTrailerTitle,$LOCALIZE[20410],Home)</onload>
+    <onload condition="!String.IsEmpty(Window(Home).Property(PlayTrailer)) + Player.HasVideo + !String.IsEqual(Window(Home).Property(PlayTrailer),Player.FileNameAndPath)">Action(Stop)</onload>
+    <onload condition="!String.IsEmpty(Window(Home).Property(PlayTrailer)) + [!Player.HasVideo | !String.IsEqual(Window(Home).Property(PlayTrailer),Player.FileNameAndPath)]">PlayMedia($ESCINFO[Window(Home).Property(PlayTrailer)],False,1)</onload>
+    <!-- SKINMOD: open straight to fullscreen. Set here, in the window's own onload, rather than at the
+         call sites: THREE separate routes activate 1123 (Action_PlayTrailer_OnClick in
+         Includes_Actions.xml, the DialogVideoInfo.xml onload autoplay, and
+         shortcuts/builtins/skinvariables-playtrailer.json). Doing it here covers all three from one
+         place and cannot be missed when a fourth route is added. -->
+    <onload>SetProperty(TrailerFullscreen,True,1123)</onload>
+    <!-- SKINMOD: TrailerHasStarted is the "video has actually begun" flag used by the autoclose timer
+         in Timers.xml. Reset on BOTH load and unload. The unload reset alone (which is all AF3 does)
+         leaves a stale flag if Kodi is killed mid-trailer, and because the autoclose timer starts on
+         [visible + TrailerHasStarted + !Player.HasVideo], a stale flag makes the NEXT trailer close
+         itself instantly during loading, before video starts. Resetting on load removes that
+         failure mode entirely. -->
+    <onload>Skin.Reset(TrailerHasStarted)</onload>
+    <onunload>Skin.Reset(TrailerHasStarted)</onunload>
+    <onunload>ClearProperty(TrailerFullscreen,1123)</onunload>
+    <onunload condition="Player.HasVideo">Action(Stop)</onunload>
+    <onload>SetProperty(TMDbHelper.ContextMenu,True)</onload>
+    <controls>
+
+        <include>Dialog_Dim_Overlay</include>
+
+        <control type="group">
+            <include>Animation_Right_Delay</include>
+            <control type="group">
+                <include>Dimension_DialogHugeMenu</include>
+
+                <include content="Dialog_Foreground_Side">
+                    <param name="dialog_size">Dimension_DialogHugeMenu</param>
+                </include>
+
+                <control type="group">
+                    <!-- Header -->
+                    <include content="Dialog_Head">
+                        <param name="label">$INFO[Window(Home).Property(PlayTrailerTitle)]</param>
+                    </include>
+                    <include content="Dialog_Manage_Head_Button">
+                        <param name="onclick">SetFocus(9898)</param>
+                    </include>
+
+                    <!-- Content -->
+                    <control type="group">
+                        <include>Dimension_Dialog_Body</include>
+                        <control type="group">
+                            <include>Dimension_Dialog_Body_Group</include>
+                            <control type="group">
+                                <include content="Dimension_Padding">
+                                    <param name="pad">20</param>
+                                </include>
+                                <include content="Dialog_Outline_InnerBox">
+                                    <control type="image">
+                                        <texture border="20" colordiffuse="black">common/dialog.png</texture>
+                                    </control>
+                                    <control type="videowindow" />
+                                </include>
+                                <control type="group">
+                                    <height>12</height>
+                                    <centerbottom>-40</centerbottom>
+                                    <control type="progress" id="499">
+                                        <width>100%</width>
+                                        <height>12</height>
+                                        <info>Player.Progress</info>
+                                        <visible>Player.HasVideo</visible>
+                                        <texturebg colordiffuse="00ffffff" border="12,0,12,0">progress/progress-nib.png</texturebg>
+                                    </control>
+                                    <control type="progress">
+                                        <description>Progressbar</description>
+                                        <width>100%</width>
+                                        <height>12</height>
+                                        <info>Player.Progress</info>
+                                        <texturebg colordiffuse="00ffffff" border="12,0,12,0">progress/progress-bg.png</texturebg>
+                                        <midtexture colordiffuse="$VAR[ColorGradient]" border="12,0,12,0" diffuse="progress/diffuse.png">progress/progress-bg.png</midtexture>
+                                        <include content="Defs_Progress_Colorfade">
+                                            <param name="id">499</param>
+                                        </include>
+                                        <visible>Player.HasVideo</visible>
+                                    </control>
+                                </control>
+                            </control>
+                        </control>
+                    </control>
+                </control>
+            </control>
+
+
+
+        </control>
+
+        <include content="Object_Hidden_Button">
+            <param name="id">9000</param>
+            <onup>SetFocus(9898)</onup>
+            <ondown>SetFocus(9898)</ondown>
+            <onleft condition="Player.HasVideo">Seek(-10)</onleft>
+            <onright condition="Player.HasVideo">Seek(10)</onright>
+        </include>
+
+        <include content="Dialog_Manage">
+            <param name="onback">9000</param>
+            <param name="include">Items_DialogTrailer</param>
+        </include>
+
+        <!-- SKINMOD: fullscreen overlay + loading cover.
+
+             THREE things here, and each one is load-bearing:
+
+             1. The backing image carries EXPLICIT left/top/width/height. It previously had none, and
+                that was the real cause of the windowed dialog still being visible for the first few
+                seconds. The parent group has no dimensions of its own, so the image fell back to the
+                native size of common/white.png instead of filling the screen. Nobody noticed in stock
+                because the fullscreen videowindow covered everything anyway - the backing only has to
+                do real work during loading, when there is no video yet. Do not remove these.
+
+             2. The group's visible is [TrailerFullscreen | !Player.HasVideo], not TrailerFullscreen
+                alone. While the trailer is resolving and buffering there is no video, so the cover is
+                shown regardless of the property - which makes the anti-flash behaviour independent of
+                whether the onload property has landed yet. Once video is playing the property alone
+                governs, so the 9005 Fullscreen toggle still works exactly as before.
+
+             3. Player.HasVideo is on the videowindow, NOT on the group. With it on the group the whole
+                overlay stayed hidden for the entire load, which is the flash this change exists to
+                remove.
+
+             The backing also stays up after playback ends until the autoclose timer fires, so there is
+             no flash of chrome on the way out. If autoclose ever regresses the result is a black
+             screen; Back still closes the dialog. -->
+        <control type="group">
+            <visible>!String.IsEmpty(Window.Property(TrailerFullscreen)) | !Player.HasVideo</visible>
+            <control type="image">
+                <left>0</left>
+                <top>0</top>
+                <width>1920</width>
+                <height>1080</height>
+                <texture colordiffuse="black">common/white.png</texture>
+            </control>
+            <control type="videowindow">
+                <visible>Player.HasVideo</visible>
+            </control>
+            <!-- SKINMOD: loading indicator, so the wait is a deliberate-looking loading screen rather
+                 than an unexplained black rectangle. Gated on !TrailerHasStarted as well as
+                 !Player.HasVideo so it appears only BEFORE playback begins - without that it would
+                 flash back up for a frame between the video ending and the autoclose timer firing. -->
+            <control type="group">
+                <visible>!Player.HasVideo + !Skin.HasSetting(TrailerHasStarted)</visible>
+                <control type="group">
+                    <centerleft>50%</centerleft>
+                    <centertop>50%</centertop>
+                    <width>100</width>
+                    <height>100</height>
+                    <include>Object_BusySpinner_Image</include>
+                </control>
+                <control type="label">
+                    <left>0</left>
+                    <right>0</right>
+                    <centertop>62%</centertop>
+                    <height>60</height>
+                    <align>center</align>
+                    <aligny>center</aligny>
+                    <font>font_main</font>
+                    <textcolor>main_fg_70</textcolor>
+                    <label>$INFO[Window(Home).Property(PlayTrailerTitle)]</label>
+                </control>
+            </control>
+        </control>
+    </controls>
+</window>

@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<includes>
+    <constant name="flixart_size_w">1849</constant>  <!-- SKINMOD: Background Style "Large" (was "Extra Large"). 16:9 preserved. -->
+    <constant name="flixart_size_h">1040</constant>
+</includes>
