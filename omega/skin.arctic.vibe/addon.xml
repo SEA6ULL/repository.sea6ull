@@ -20,7 +20,7 @@
     </extension>
     <extension point="xbmc.addon.metadata">
         <summary lang="en">A minimal row based skin</summary>
-        <description lang="en">Arctic Vibe is a minimal row based skin with customisable widgets. A modified fork of Arctic Fuse 2 by jurialmunkey. Requires dependencies only found in jurialmunkey's repo.</description>
+        <description lang="en">A modified fork of Arctic Fuse 2 by Jurialmunkey. You must first intall the following dependencies found only in Jurialmunkey's repo: Texture Maker, Roboto CJKSC</description>
         <platform>all</platform>
         <license>Creative Commons Attribution Non-Commercial Share-Alike 4.0</license>
         <forum />
