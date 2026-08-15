@@ -6,6 +6,37 @@
         <animation effect="slide" time="400" end="0,$PARAM[posy]" start="0" tween="quadratic" easing="out" reversible="false" condition="!$PARAM[condition]">Conditional</animation>
     </include>
 
+    <!-- SKINMOD: Combine Widgets collision fix.
+         "Combine Widgets" (use_as_widget) on a category makes its widgets selectable from the
+         submenu button strip, grouplist 3002 (Hub_Submenu_Group). That strip is pinned at
+         hub_submenuwidget_t (1300) inside Hub_Menu_Group, which carries the permanent -440
+         offset described in section 1, so it rests at ~860px and is NOT affected by
+         hub_widgets_shift_y. With the widget block pushed down 140px the first row lands on
+         top of the strip.
+
+         This slides widget wrapper group 340 back up by exactly hub_widgets_shift_y whenever
+         the focused category has Combine Widgets enabled, so that category renders at the
+         original upstream spacing. Because it translates the whole wrapper it cannot alter
+         row-to-row pitch (same reasoning as section 3).
+
+         The condition is character-for-character the strip's own visibility condition from
+         shortcuts/generator/data/base/category_submenu.xml, so the two can never disagree.
+
+         posy is applied when the condition is FALSE (see Hub_Slide_Group_OnWidgets above), so
+         the condition is the *un*-combined case and the group rests at 0 (shift intact) there.
+
+         time defaults to 1 (instant) so there is no window in which the row is mid-slide while
+         the strip is fading in. Set it to 400 for a slide matching Hub_Slide_Group_OnWidgets. -->
+    <include name="Hub_Slide_Widgets_OnCombined">
+        <param name="posy">-hub_widgets_shift_y</param>
+        <param name="condition">[String.IsEmpty(Container(300).ListItem.Property(use_as_widget))]</param>
+        <param name="time">1</param>
+        <definition>
+            <animation effect="slide" time="$PARAM[time]" end="0" start="0,$PARAM[posy]" tween="quadratic" easing="out" reversible="false" condition="$PARAM[condition]">Conditional</animation>
+            <animation effect="slide" time="$PARAM[time]" end="0,$PARAM[posy]" start="0" tween="quadratic" easing="out" reversible="false" condition="![$PARAM[condition]]">Conditional</animation>
+        </definition>
+    </include>
+
 
 
     <include name="Hub_Submenu_List_Definition_Content">
@@ -394,6 +425,9 @@
             <!-- SKINMOD: +hub_widgets_shift_y applied so the next row clears the bottom edge. -->
             <top>hub_widgets_shift_y</top>
             <bottom>-hub_widgets_shift_y</bottom>
+            <!-- SKINMOD: cancels the shift for categories using Combine Widgets, which would
+                 otherwise collide with the submenu button strip (grouplist 3002). -->
+            <include>Hub_Slide_Widgets_OnCombined</include>
             <include>skinvariables-$PARAM[categories]-widgets</include>
         </control>
 

@@ -1054,6 +1054,75 @@ the file appears in `addon_data` only once populated. Not a missing file.
 
 ---
 
+## 18. Combine Widgets no longer collides with the widget row
+
+**Symptom.** Turning on **Combine Widgets** for a category (shortcut editor → *Category: Combine
+Widgets*) made the category's submenu button strip overlap the first widget row.
+
+**Cause.** Two separate positioning systems that section 3 pulled apart.
+
+The button strip is grouplist **3002** (`Hub_Submenu_Group`, `1080i/Includes_Hubs.xml`), pinned at
+`hub_submenuwidget_t` (1300) and nested inside `Hub_Menu_Group` — which carries the permanent
+**-440** offset described in section 1. It therefore rests at **~860px** and has no relationship
+to `hub_widgets_shift_y`. Section 3 moved widget wrapper group **340** down 140px; the strip stayed
+where it was, and the row landed on top of it.
+
+The strip only exists for combined categories, so this was invisible until Combine Widgets was
+switched on. Its generated visibility condition
+(`shortcuts/generator/data/base/category_submenu.xml`) is:
+
+```
+!String.IsEmpty(Container(300).ListItem.Property(use_as_widget))
+```
+
+**Fix.** New include `Hub_Slide_Widgets_OnCombined` (`1080i/Includes_Hubs.xml`), added to group 340
+in `Hub_Standard`. It slides the wrapper back up by exactly `hub_widgets_shift_y` when the focused
+category has Combine Widgets on, so **that category renders at the original upstream spacing** and
+every other category keeps the mod's lowered rows.
+
+```xml
+<include name="Hub_Slide_Widgets_OnCombined">
+    <param name="posy">-hub_widgets_shift_y</param>
+    <param name="condition">[String.IsEmpty(Container(300).ListItem.Property(use_as_widget))]</param>
+    <param name="time">1</param>
+    ...
+</include>
+```
+
+### Why an animation and not `<top>`
+`use_as_widget` is a **per-category runtime property** — it changes as the user moves along the
+categories list. `<top>` / `<bottom>` and `<include content="X" condition="...">` are both resolved
+**once at skin load**, so neither can react to it. A conditional slide on the wrapper is the skin's
+own idiom for this (`Hub_Slide_Group_OnWidgets`), and — like the `<top>` in section 3 — it
+translates the entire block, so it **cannot alter row-to-row pitch**. The section 3 warning about
+`widget_items_h` still stands and is not touched here.
+
+### Inverted condition — read carefully before editing
+Following `Hub_Slide_Group_OnWidgets`, `posy` is the resting offset applied when `condition` is
+**FALSE**. So `condition` holds the ***un*-combined** case (`String.IsEmpty(...)`), where the group
+rests at 0 and the section 3 shift stays intact. Negating the condition inverts the whole feature.
+
+### Only `Hub_Standard` needs this
+`Hub_Widgets_Only` also has a group 340, but it is the `Hub.<id>.DisableSubmenu` path, and
+`category_submenu.xml` is gated on `!Skin.HasSetting(Hub.{window_id}.DisableSubmenu)`. The strip
+can never render there, so its `_detailed` (580) shift is left alone.
+
+### `time` defaults to 1 (instant)
+A 400ms slide would leave a window where the row is mid-travel while the strip fades in — briefly
+reproducing the collision the fix exists to remove. Raise it to 400 for a slide matching
+`Hub_Slide_Group_OnWidgets` if the snap reads as abrupt.
+
+### Not changed: fanart size
+`flixart_size_h` (section 4) was raised 140px to match the row shift, but it is a **constant**, and
+Kodi constants cannot vary per category. Combined categories therefore sit at stock row height
+against a slightly taller fanart panel. This is cosmetic — the panel is top-right anchored with a
+gradient falloff — and reverting it would need a second `Background_FlixArt` variant keyed on the
+same condition. Not done; noted here in case the overlap is ever judged too heavy.
+
+**No rebuild required.** The change is in `1080i/`, not under `shortcuts/generator/`.
+
+---
+
 ## Validation performed after every change
 
 1. **XML well-formedness** across all files in `1080i/` (258 files at last count).
@@ -1076,6 +1145,7 @@ the file appears in `addon_data` only once populated. Not a missing file.
 | What | Constant / file | Current |
 |---|---|---|
 | Hub widget row vertical position | `hub_widgets_shift_y` (+ `_detailed`) | 140 / 580 |
+| Combine Widgets un-shift | `Hub_Slide_Widgets_OnCombined` (`time` param) | `-hub_widgets_shift_y`, instant |
 | Row view vertical position | `view_row_shifted`, `view_row_hitrect_y_shifted` | 650 / 726 |
 | Fanart panel size | `flixart_size_w` / `_h` (base = Medium) | 1689 x 950 |
 | Wall grid geometry | `View_Wall_Include` `<top>` / `<bottom>` | 200 / 140 |
