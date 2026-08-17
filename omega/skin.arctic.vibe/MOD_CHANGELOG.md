@@ -1,6 +1,6 @@
 # Arctic Vibe — Mod Changelog
 
-Ships as **Arctic Vibe** (`skin.arctic.vibe`, v1.0) by sea6ull.
+Ships as **Arctic Vibe** (`skin.arctic.vibe`, v1.0.3) by sea6ull.
 A modified fork of **Arctic Fuse 2** (`skin.arctic.fuse.2`, v2.12.12) by jurialmunkey.
 
 This document records every change made to the upstream skin, and — where it matters —
@@ -489,8 +489,9 @@ $INFO[System.BuildVersionShort,Kodi ,]$INFO[System.AddonVersion(skin.arctic.vibe
 * `System.BuildVersion` → **`System.BuildVersionShort`** drops the `Git:<date>-<hash>` suffix.
 * `AF2 v` → `AV v`.
 * The version number itself is **not hardcoded** — it is read live from `addon.xml` via
-  `System.AddonVersion`, which is why setting `version="1.0"` there makes this line read
-  "AV v1.0". Keep it that way; hardcoding would let the two drift apart.
+  `System.AddonVersion`, which is why the `version` attribute there is what this line renders —
+  currently `version="1.0.3"`, so it reads "AV v1.0.3". Keep it that way; hardcoding would let the
+  two drift apart.
 
 The info label targets the addon id, which is now `skin.arctic.vibe` (see section 10).
 
@@ -1120,6 +1121,170 @@ gradient falloff — and reverting it would need a second `Background_FlixArt` v
 same condition. Not done; noted here in case the overlap is ever judged too heavy.
 
 **No rebuild required.** The change is in `1080i/`, not under `shortcuts/generator/`.
+
+---
+
+## 19. "Hide widget initialisation behind splash" made to work in Advanced mode
+
+**Symptom.** Skin Settings → Other → Startup → *Hide widget initialisation behind splash*
+(`Skin.HasSetting(Startup.WaitForLoad)`, string `#31428`) had no observable effect. Kodi splash →
+skin splash → Home appears immediately with empty widget rows that fill in over several seconds.
+
+### What the setting actually does
+
+It is **not** an extension of window 1198. It draws `Hub_Widget_Splash` as a full-screen overlay
+*inside* the Home/hub window — `Background_StartUp` (which is what cycles the
+`Skin.String(Startup.ImageFolder)` launch images), `Object_StartUp_Logo`, an "initialising" label and
+a busy spinner. Because it reuses the same furniture, it reads as the skin splash lingering.
+
+`Hub_Controls` (`1080i/Includes_Hubs.xml`) contains **three** copies of that include. Which one is
+compiled is decided at **skin load** from two params:
+
+| Variant | Compiled when | Watched container |
+|---|---|---|
+| 1 | `[$PARAM[is_homemenu]]` | `Container(100601)` — first widget row |
+| 2 | `![is_homemenu]` + `![widgets_only]` + `!DisableForHubs` | **`Container(300)`** — category menu |
+| 3 | `![is_homemenu]` + `$PARAM[widgets_only]` + `!DisableForHubs` | `Container(100601)` |
+
+### The defect
+
+Variant 2's condition was:
+
+```
+System.HasAlarm(SplashTimeOut) + Integer.IsEqual(Container(300).NumItems,0) + Container(300).IsUpdating
+```
+
+Container 300 is the category selector — a `fixedlist` fed by the generator's
+`skinvariables-<menu>-staticitems` (`Categories_Selector` in `1080i/Includes_Categories.xml`). It is
+**static**: populated the instant the window opens, and it never reports `IsUpdating`, because that
+flag only goes true for background directory fetches. Both of the last two terms are permanently
+false, so the overlay could never draw.
+
+**And variant 2 is the one Home compiles.** `Home.xml` passes *both*
+`is_homemenu` and `widgets_only` as `Skin.HasSetting(Hub.Home.DisableSubmenu)`, which §15b resets so
+that first run lands on Advanced — so both are false. Every hub with a submenu compiles it too. The
+setting therefore worked **only** on a `widgets_only` hub (variant 3).
+
+This is an upstream hole — Advanced-mode users never had the feature in AF2 either. Forcing Advanced
+(§5, §15b) is what made it universal.
+
+Not the cause: the `SplashTimeOut` alarm. `Action_Hubs_Onload` restarts it on every Home/hub load
+(visible in a debug log as `started alarm with name: splashtimeout`), so it is always live.
+
+### Fix
+
+Variant 2 now watches the **first widget row of the first category**, using the same empty-or-
+placeholder + `IsUpdating` test the other two variants use.
+
+Getting the right container id is the whole difficulty, because there is no single widget id space.
+`setup/widgets_row.xml` assigns `widget_id = grouplist_item_x * 1000 + 600 + enum_x` (`enum_x`
+1-based), but `grouplist_item_x` comes from whichever datafile the path pulls in:
+
+| Path | Datafile | `grouplist_item_x` | First row |
+|---|---|---|---|
+| Classic / `widgets_only` hub | `setup/widgets_hubsmenu.xml` | `100` (constant) | 100601 |
+| Classic Home (sidemenu) | `base/home_widgets.xml` | `item_x + 100` | 100601 |
+| Global widgets | `setup/widgets_constant.xml` | `200` (constant) | 200601 |
+| **Advanced (this variant)** | `setup/widgets_standard.xml` | `{item_x}` — **no offset** | **601** |
+
+Advanced Home and Advanced hubs reach `Hub_Standard` → `skinvariables-<categories>-widgets` →
+`base/category_widgets.xml` → `setup/widgets_standard.xml`. So **100601 does not exist in Advanced
+mode at all**. That is exactly why `Includes_Actions.xml` only ever references 100601 from
+`Action_Hubs_Classic_SetFocus` (line ~318) and from the `onload` gated on
+`is_homemenu | DisableSubmenu` (line ~272) — upstream never assumes it on the Complex path.
+
+`item_x` is 0-based: `home_widgets.xml` uses `item_x + 100` for the same role that
+`widgets_hubsmenu.xml` fills with the constant `100`, so the two classic paths only share the 100601
+id space if the first item is 0. That gives **601**.
+
+**Do not add an OR arm on another category's row as a safety net.** A `CDirectoryProvider` that has
+never fetched reports `IsUpdating` **true** indefinitely — it is not "idle", it is "not yet run". Only
+the focused category's rows fetch on window init (confirmed in debug logs: four providers refresh on
+Home and nothing else ever does, even after navigating). So a second arm on, say, `Container(1601)`
+sits permanently at `NumItems==0 + IsUpdating`, which latches the splash on forever.
+
+A wrong id fails *safe*: a control that does not exist reports `NumItems` 0 and `IsUpdating` false, so
+the splash simply never appears. A plausible-but-unfetched id fails *stuck*. Only single-arm
+conditions on the focused category's first row are correct here.
+
+The stock condition is preserved verbatim in the comment above the edit, along with the full id
+derivation.
+
+**To confirm the id directly**, read the generated
+`1080i/script-skinvariables-generator-includes-<skinuser>.xml` on the device and find the first
+`<control type="list" id="...">` under the `Hub_Menu_Group` include. That number is the first widget
+row of the first category and is what this condition must name.
+
+**No rebuild required.** The change is in `1080i/`, not under `shortcuts/generator/`.
+
+### Correction history
+
+**1.0.1** used `Container(100601)` for variant 2 and did nothing. The id was derived from
+`base/side_vars.xml`/`base/home_widgets.xml`, both of which carry the `+ 100` offset, without checking
+which datafile the Advanced path actually loads — it is `setup/widgets_standard.xml`, which has no
+offset. Recorded because the four-way split above is not obvious from the templates and is easy to
+get wrong the same way twice.
+
+**1.0.2** used `Container(601) | Container(1601)`, the second arm hedging the 0-vs-1-based reading of
+`item_x`. Result: the splash never cleared — it held past 30s and only dropped on a remote keypress.
+That behaviour identifies the mechanism above (never-fetched provider ⇒ `IsUpdating` true) and, in
+doing so, confirms `item_x` is 0-based: under the 1-based reading 1601 would have been a focused-
+category row, fetched at startup, and the splash would have cleared on its own at ~8s.
+
+**1.0.3** drops the hedge. Single arm on `Container(601)`.
+
+### Two user settings this still depends on
+
+* **`Startup.WaitForLoad.DisableForHubs` must stay off** (the "- Hubs" radio, string `#31114`,
+  shown as *selected* when the setting is unset). Because Home now evaluates as a non-homemenu
+  window, this sub-toggle silently governs **Home** as well as the hubs. With it on, variant 2 is not
+  compiled at all and the fix is inert.
+* **`Startup.ImageFolder` must point at a folder**, or the overlay shows the wordmark and spinner
+  with no cycling launch images.
+
+### Scope — what this does and does not hide
+
+The overlay clears when the **first** widget row reports items, not when all of them finish. On a
+measured cold start (Home window init 12:21:19.607, first row populated 12:21:29.223) that is ~9.6s
+of splash, after which Home appears with row 1 filled and later rows still arriving. It hides the
+worst of the wait, not all of it.
+
+Widget rows on Home are slow mainly because Home is the window that loads *during add-on startup*:
+the same TMDb Helper widget takes ~1.3s alone in a hub, ~2.8–3.7s in a quiet hub alongside four
+others, and ~9–10s on Home while nine add-on services boot. Kodi also serves directory fetches from
+**three** job worker threads, so a fourth and fifth provider queue — including cheap native ones. A
+`library://music/recentlyplayedalbums.xml/` row measured a **6 ms** query that waited 9.4–11.9s for a
+slot behind a plugin fetch. None of that is skin-side; it is noted here because it is what the splash
+is covering up.
+
+### Deliberately not changed
+
+* **The `Hub.Home.ReplaceWindow` variants in `Home.xml`** (hub 1101–1109 rendered *as* Home) pass no
+  `is_homemenu`, so they inherit `false` and also compile variant 2 — they are fixed by the same
+  edit, but they remain gated on `DisableForHubs`. Arguably correct: the window really is a hub.
+* **Variant 1 was left gated on `is_homemenu`.** It is unreachable while Advanced is the only mode,
+  but it is stock, harmless, and the honest record of what the Basic path did. Decoupling Home from
+  the `DisableForHubs` sub-toggle would need a new `is_home` param on `Hub_Controls` set from
+  `Home.xml`; offered, not done.
+
+### Version bumped to 1.0.3
+
+`addon.xml` `version` `1.0` → `1.0.1` → `1.0.2` → **`1.0.3`**. See *Correction history* above for what
+changed at each step.
+
+Kodi's version comparison is per-component and numeric, so `1.0.3` > `1.0.2` > `1.0.1` > `1.0` and an install
+over the top is treated as an upgrade rather than a reinstall.
+
+**Why not `1.01`.** Because the comparison is numeric per component, `1.01` and `1.1` parse to the
+same `[1, 1]` and compare **equal** — a later `1.1` release could not be installed over a `1.01` one.
+Three-component patch numbering avoids that trap entirely. For the same reason `1.01` sorts *above*
+`1.0.1` (`[1,1]` vs `[1,0,1]`), so if a `1.01` build was ever installed, Kodi will see this one as a
+downgrade and refuse it — uninstall first, or bump past it.
+
+Per §10, the bump is also what forces Kodi to re-read cached addon metadata; skin XML under `1080i/`
+is re-read on every skin load regardless, so the bump is not what makes this fix take effect — but it
+does mean the addon browser and the settings version line update. The version line needs no edit: it
+reads live via `System.AddonVersion(skin.arctic.vibe)` and now renders "AV v1.0.3" (§11).
 
 ---
 

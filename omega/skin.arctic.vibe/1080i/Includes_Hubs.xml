@@ -349,8 +349,41 @@
             <include content="Hub_Widget_Splash" condition="Skin.HasSetting(Startup.WaitForLoad) + [$PARAM[is_homemenu]]">
                 <param name="condition">System.HasAlarm(SplashTimeOut) + [Integer.IsEqual(Container(100601).NumItems,0) | [Integer.IsEqual(Container(100601).NumItems,1) + String.IsEqual(Container(100601).ListItemAbsolute(0).Label,$LOCALIZE[31046])]] + Container(100601).IsUpdating</param>
             </include>
+            <!-- SKINMOD: this variant watched Container(300), the category menu. That is a
+                 fixedlist fed by the generator's skinvariables-<menu>-staticitems, so it has items
+                 the instant the window opens and never reports IsUpdating (that flag belongs to
+                 background directory fetches). NumItems==0 + IsUpdating was therefore unsatisfiable
+                 and the splash never drew.
+                 This is the variant Home compiles: Home.xml passes both is_homemenu and
+                 widgets_only as Skin.HasSetting(Hub.Home.DisableSubmenu), which mod section 15b
+                 resets so Home always lands on Advanced, making both false. Every hub with a
+                 submenu compiles it too. So the setting was inert everywhere except a
+                 widgets_only hub (the variant below).
+
+                 Container id: NOT 100601. Widget ids are grouplist_item_x * 1000 + 600 + enum_x
+                 (shortcuts/generator/data/setup/widgets_row.xml, enum_x 1-based), and
+                 grouplist_item_x differs per path:
+                   setup/widgets_hubsmenu.xml (classic/widgets_only hub) -> 100    => 100601
+                   base/home_widgets.xml      (classic Home, sidemenu)   -> item_x + 100
+                   setup/widgets_constant.xml (global widgets)           -> 200    => 200601
+                   setup/widgets_standard.xml (ADVANCED, this variant)   -> item_x => no offset
+                 Advanced Home/hubs reach Hub_Standard -> skinvariables-<categories>-widgets ->
+                 base/category_widgets.xml -> setup/widgets_standard.xml, so the first category's
+                 first row is item_x * 1000 + 601. 100601 exists only on the classic paths, which is
+                 why Includes_Actions.xml only ever references it from Action_Hubs_Classic_SetFocus
+                 and from the onload gated on is_homemenu | DisableSubmenu.
+                 item_x is 0-based (home_widgets' item_x + 100 must align with the constant 100 that
+                 widgets_hubsmenu uses for the same role), giving 601.
+                 Do NOT add an OR arm on another category's row (e.g. 1601) as a safety net: a
+                 CDirectoryProvider that has never fetched reports IsUpdating TRUE indefinitely, and
+                 only the focused category's rows fetch on window init, so such an arm is
+                 permanently [NumItems==0 + IsUpdating] and latches the splash on forever. That is
+                 exactly what the 1.0.2 build did. A wrong id here fails safe (a control that does
+                 not exist reports NumItems 0 and IsUpdating false, so the splash simply never
+                 shows); a right-looking id from an unfetched category does not.
+                 Stock condition preserved: Integer.IsEqual(Container(300).NumItems,0) + Container(300).IsUpdating -->
             <include content="Hub_Widget_Splash" condition="Skin.HasSetting(Startup.WaitForLoad) + !Skin.HasSetting(Startup.WaitForLoad.DisableForHubs) + ![$PARAM[is_homemenu]] + ![$PARAM[widgets_only]]">
-                <param name="condition">System.HasAlarm(SplashTimeOut) + Integer.IsEqual(Container(300).NumItems,0) + Container(300).IsUpdating</param>
+                <param name="condition">System.HasAlarm(SplashTimeOut) + [Integer.IsEqual(Container(601).NumItems,0) | [Integer.IsEqual(Container(601).NumItems,1) + String.IsEqual(Container(601).ListItemAbsolute(0).Label,$LOCALIZE[31046])]] + Container(601).IsUpdating</param>
             </include>
             <include content="Hub_Widget_Splash" condition="Skin.HasSetting(Startup.WaitForLoad) + !Skin.HasSetting(Startup.WaitForLoad.DisableForHubs) + ![$PARAM[is_homemenu]] + $PARAM[widgets_only]">
                 <param name="condition">System.HasAlarm(SplashTimeOut) + [Integer.IsEqual(Container(100601).NumItems,0) | [Integer.IsEqual(Container(100601).NumItems,1) + String.IsEqual(Container(100601).ListItemAbsolute(0).Label,$LOCALIZE[31046])]] + Container(100601).IsUpdating</param>
