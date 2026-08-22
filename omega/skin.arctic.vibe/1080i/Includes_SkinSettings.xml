@@ -890,6 +890,18 @@
             <onclick>Skin.ToggleSetting(TMDbHelper.DisablePVR)</onclick>
             <selected>!Skin.HasSetting(TMDbHelper.DisablePVR)</selected>
         </include>
+        <!-- SKINMOD: TMDb Helper error notification suppression (see MOD_CHANGELOG §20) -->
+        <include content="Settings_Button" description="TMDbHelper error notifications">
+            <param name="dialog">false</param>
+            <param name="window">skinsettings</param>
+            <param name="baseid">$PARAM[baseid]</param>
+            <param name="id">025</param>
+            <param name="control">radiobutton</param>
+            <param name="slevel">3</param>
+            <label>Suppress TMDb Helper error notifications</label>
+            <onclick>Skin.ToggleSetting(TMDbHelper.SuppressErrorNotifications)</onclick>
+            <selected>Skin.HasSetting(TMDbHelper.SuppressErrorNotifications)</selected>
+        </include>
 
 
     </include>

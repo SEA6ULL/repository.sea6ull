@@ -4,6 +4,9 @@
     <controls>
 
         <control type="group">
+            <!-- SKINMOD: suppress TMDb Helper error toasts (see MOD_CHANGELOG §20) -->
+            <visible>!Skin.HasSetting(TMDbHelper.SuppressErrorNotifications) | !String.StartsWith(Control.GetLabel(401),TheMovieDb Helper)</visible>
+            <animation effect="fade" start="100" end="0" time="0" condition="Skin.HasSetting(TMDbHelper.SuppressErrorNotifications) + String.StartsWith(Control.GetLabel(401),TheMovieDb Helper)">Conditional</animation>
 
             <include content="Furniture_Busy_Main">
                 <param name="minilabel">$INFO[Control.GetLabel(402)]</param>

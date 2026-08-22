@@ -1,6 +1,6 @@
 # Arctic Vibe — Mod Changelog
 
-Ships as **Arctic Vibe** (`skin.arctic.vibe`, v1.0.3) by sea6ull.
+Ships as **Arctic Vibe** (`skin.arctic.vibe`, v1.0.4) by sea6ull.
 A modified fork of **Arctic Fuse 2** (`skin.arctic.fuse.2`, v2.12.12) by jurialmunkey.
 
 This document records every change made to the upstream skin, and — where it matters —
@@ -490,7 +490,7 @@ $INFO[System.BuildVersionShort,Kodi ,]$INFO[System.AddonVersion(skin.arctic.vibe
 * `AF2 v` → `AV v`.
 * The version number itself is **not hardcoded** — it is read live from `addon.xml` via
   `System.AddonVersion`, which is why the `version` attribute there is what this line renders —
-  currently `version="1.0.3"`, so it reads "AV v1.0.3". Keep it that way; hardcoding would let the
+  currently `version="1.0.4"`, so it reads "AV v1.0.4". Keep it that way; hardcoding would let the
   two drift apart.
 
 The info label targets the addon id, which is now `skin.arctic.vibe` (see section 10).
@@ -1285,6 +1285,97 @@ Per §10, the bump is also what forces Kodi to re-read cached addon metadata; sk
 is re-read on every skin load regardless, so the bump is not what makes this fix take effect — but it
 does mean the addon browser and the settings version line update. The version line needs no edit: it
 reads live via `System.AddonVersion(skin.arctic.vibe)` and now renders "AV v1.0.3" (§11).
+
+---
+
+## 20. TMDb Helper error notifications suppressible from skin settings
+
+**Files:** `1080i/DialogNotification.xml`, `1080i/Includes_SkinSettings.xml`
+**Setting:** `TMDbHelper.SuppressErrorNotifications` (default off — notifications shown)
+**Where:** Settings > Other > Expert (`slevel` 3), id `025`
+
+### Why it is done this way
+There is no add-on-side hook to gate this. `jurialmunkey.logger.kodi_traceback()` calls
+`Dialog().notification()` unconditionally — it reads no setting and no skin property, so
+`Skin.HasSetting(...)` cannot be consulted by the add-on. The add-on's own
+`startup_notifications` / `sync_notifications` / `connection_notifications` settings cover Trakt
+auth, sync dialogs and HTTP connection errors respectively; none of them touch the
+`kodi_try_except` traceback path, which is the catch-all that fires for *any* unhandled exception
+in the TMDb Helper service.
+
+What the skin *does* own is `DialogNotification.xml` — Kodi renders every toast through it.
+Kodi populates control `400` (icon), `401` (header) and `402` (message) before the window draws,
+and this skin already reads 401/402 to build the toast. The suppression therefore works by
+refusing to draw the dialog when the header identifies TMDb Helper.
+
+### Match string
+`kodi_traceback` builds its header as `f'TheMovieDb Helper {get_localized(257)}'`. String 257 is a
+Kodi core string, so its value is locale-dependent — the match therefore uses
+`String.StartsWith(Control.GetLabel(401),TheMovieDb Helper)` on the add-on-name prefix only, which
+is locale-independent and catches **every** traceback notification the add-on can raise, present
+and future. That breadth is the point: it is the coverage the add-on's own settings cannot give.
+
+### Change
+`DialogNotification.xml` — `<visible>` added to the outer group, plus a zero-time fade animation
+on the inverse condition. The animation is belt-and-braces: `<visible>` is re-evaluated
+continuously and there is a theoretical window where the group renders for a frame before Kodi has
+populated control 401. The animation collapses it to alpha 0 in that frame.
+
+`Includes_SkinSettings.xml` — radiobutton appended to the Expert section of
+`SkinSettings_Items_Other`, after the existing `TMDbHelper.DisablePVR` entry (id `024`, so the new
+entry takes `025`). Label is literal text rather than `$LOCALIZE[...]`; swap it for a string in
+`language/resource.language.en_gb/strings.po` if translation is ever wanted.
+
+### Toggle polarity — deliberately NOT matching the neighbouring entries
+The button reads **"Suppress TMDb Helper error notifications"** and uses a *positive* selected
+condition:
+
+```xml
+<selected>Skin.HasSetting(TMDbHelper.SuppressErrorNotifications)</selected>
+```
+
+Selected = suppression active = no toasts. The setting name, the label and the radio state all move
+in the same direction.
+
+This is inconsistent with `TMDbHelper.DisablePVR` (id `024`) and several others in this file, which
+name the setting for the thing being *disabled* and then invert with `!Skin.HasSetting(...)` so the
+button can be labelled for the feature. That pattern reads well in the settings list and badly
+everywhere else: the first build of this entry used it, and the inverted state made a test run
+unreadable — "setting off" meant the radio was *on*, because the radio described notifications while
+the setting described suppression. Two things called "off" in the same sentence.
+
+If a future entry here is a `Suppress`/`Disable`/`Hide` setting, prefer this polarity over the
+neighbours'. Consistency with a confusing local convention is not worth the ambiguity.
+
+### Trap
+The `<visible>` must sit on the window's top-level **control**, not on the window. Kodi has no
+`<visible>` on `<window>`, and putting the condition on the individual includes instead would
+leave the `Furniture_Busy_Base` backing plate drawn — an empty toast panel with no text.
+
+### Coupled behaviour worth knowing
+`Furniture_Busy_Main` reads `Control.GetLabel(401)` / `(402)` as its `mainlabel` / `minilabel`
+params. Those controls are declared *after* the group in the file and are hidden via
+`Object_Hidden_Item_Definition`. Do not reorder or remove them — they are Kodi's data carriers for
+this window, not decoration.
+
+### Version bumped to 1.0.4
+
+`addon.xml` `version` **`1.0.3` → `1.0.4`**. Same numeric-comparison reasoning as §19: three
+component parts, so `1.0.4` > `1.0.3` and an install over the top is an upgrade, not a reinstall.
+
+Nothing here needed the bump to take effect — `1080i/` XML is re-read on every skin load — but it
+refreshes cached addon metadata and the settings version line, which reads live via
+`System.AddonVersion(skin.arctic.vibe)` and now renders "AV v1.0.4" (§11).
+
+### What this does not do
+The dialog still opens and closes on schedule (`Window Init` / `Window Deinit` still appear in
+`kodi.log`, roughly 5.4s per toast) — it is drawn transparent, not prevented. The underlying error
+still occurs, is still logged, and still costs the wasted API round trip and the stale item panel.
+This hides a symptom.
+
+It also hides TMDb Helper errors that *are* worth seeing — expired Trakt tokens, bad API keys,
+Fanart.tv failures. Default is off for that reason; turn it on only while a known upstream bug is
+outstanding. `kodi.log` remains complete either way.
 
 ---
 
