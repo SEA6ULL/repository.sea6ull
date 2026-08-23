@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<addon id="plugin.program.sea6ullwiz" name="SEA6ULL Wizard" version="1.0.0" provider-name="SEA6ULL">
+<addon id="plugin.program.sea6ullwiz" name="SEA6ULL Wizard" version="1.0.2" provider-name="SEA6ULL">
 	<requires>
 		<import addon="xbmc.python" version="3.0.1"/>
 		<import addon="script.module.requests"/>
@@ -19,7 +19,14 @@
 		<website></website> 
 		<email></email>
 		<source></source>
-		<news></news>
+		<news>v1.0.2
+- Backup date and size now show in the item name (skins ignored the second label)
+
+v1.0.1
+- Added Delete Backup to the Restore Backup context menu (long press)
+- Backups now list newest first and show date and file size
+- Removed the irrelevant media context menu options from backup items
+- Restore Backup list no longer errors when the backup folder is missing</news>
 		<assets>
 			<icon>icon.png</icon>
 			<fanart>fanart.jpg</fanart>

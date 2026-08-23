@@ -10,7 +10,7 @@ from .maintenance import fresh_start, clear_packages, clear_thumbnails, advanced
 from .whitelist import get_whitelist
 from .addonvar import addon
 from .save_data import restore_gui, restore_skin, backup_gui_skin_user, restore_gui_user, restore_skin_user
-from .backup_restore import backup_build, restore_menu, restore_build, get_backup_folder, reset_backup_folder
+from .backup_restore import backup_build, restore_menu, restore_build, delete_backup, get_backup_folder, reset_backup_folder
 from .focus_settings import tmdbh_mdblist_api, rurl_settings_rd, rurl_settings_pm, rurl_settings_ad, am_auth_nondebrid, am_auth_meta, am_supported_furk, am_supported_easy, am_supported_file, am_supported_meta, am_supported_trakt, am_supported_debrid, am_manage, am_backup
 
 handle = int(sys.argv[1])
@@ -28,7 +28,8 @@ def router(paramstring):
     fanart = p.get_fanart()
     description = p.get_description()
     
-    xbmcplugin.setContent(handle, 'files')
+    if handle >= 0:
+        xbmcplugin.setContent(handle, 'files')
 
     if mode is None:
         main_menu()
@@ -111,6 +112,9 @@ def router(paramstring):
         
     elif mode == 29:
         restore_skin_user()
+
+    elif mode == 30:
+        delete_backup(url)
         
 # Focus Add-on settings
     elif mode == 50:
@@ -146,5 +150,8 @@ def router(paramstring):
         from resources.lib.GUIcontrol import notify
         message = notify.get_notify()[1]
         notify.notification(message)
-        
-    xbmcplugin.endOfDirectory(handle)
+
+    # Actions fired from a context menu run via RunPlugin() and get handle -1.
+    # Calling endOfDirectory() on those logs an error, so only close real listings.
+    if handle >= 0:
+        xbmcplugin.endOfDirectory(handle)

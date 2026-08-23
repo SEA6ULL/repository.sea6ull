@@ -1,12 +1,23 @@
 import xbmc
 import xbmcgui
+import xbmcplugin
+import sys
 import shutil
 import os
 import zipfile
+from datetime import datetime
+from urllib.parse import quote_plus
 from zipfile import ZipFile
 from pathlib import Path
 from .addonvar import home, addon_profile, addon_path, setting, setting_set, translatePath, xbmcPath, addon_id, dp, local_string, addon_name, addon_icon, addon_fanart
 from .utils import add_dir
+from .colors import colors
+
+COLOR1 = colors.color_text1
+COLOR2 = colors.color_text2
+
+MODE_RESTORE = 15
+MODE_DELETE = 30
 
 p = Path(home)
 backup_path = Path(translatePath(setting('backupfolder')))
@@ -117,10 +128,106 @@ def reset_backup_folder():
     setting_set('backupfolder', 'special://home/backups')
     xbmcgui.Dialog().ok('Backup Folder', 'Backup Folder Location\nSet to Default')
 
+def _handle():
+    try:
+        return int(sys.argv[1])
+    except (IndexError, ValueError):
+        return -1
+
+def _plugin_url(mode, path):
+    return f'{sys.argv[0]}?mode={mode}&url={quote_plus(str(path))}'
+
+def _human_size(num):
+    for unit in ('B', 'KB', 'MB', 'GB'):
+        if abs(num) < 1024.0:
+            return f'{num:.0f} {unit}' if unit == 'B' else f'{num:.1f} {unit}'
+        num /= 1024.0
+    return f'{num:.1f} TB'
+
+def _backup_files():
+    if not backup_path.is_dir():
+        return []
+    files = [x for x in backup_path.iterdir() if x.is_file() and x.suffix.lower() == '.zip']
+    # newest first, so the oldest backups worth deleting sit at the bottom
+    return sorted(files, key=lambda x: x.stat().st_mtime, reverse=True)
+
+def _backup_details(build):
+    try:
+        stat = build.stat()
+        stamp = datetime.fromtimestamp(stat.st_mtime).strftime('%d %b %Y %H:%M')
+        return f'{stamp} - {_human_size(stat.st_size)}'
+    except OSError:
+        return ''
+
+def _backup_label(build):
+    # label2 is ignored by most skins in plugin lists, so the date/size has to go
+    # into the visible label. Hex colour rather than a name: named colours depend
+    # on the skin's colour theme being loaded, hex always renders.
+    label = COLOR2(build.stem)
+    details = _backup_details(build)
+    if details:
+        label = f'{label}  [COLOR FF999999]{details}[/COLOR]'
+    return label
+
 def restore_menu():
-    build_backups = ([x for x in backup_path.iterdir() if x.is_file() and str(x).endswith('.zip')])
+    handle = _handle()
+    # Clear the content type set by the router. As a video/files list these items
+    # pick up Kodi's media context menu (Play, Queue item, Mark as watched, etc.),
+    # none of which make sense for a backup zip.
+    xbmcplugin.setContent(handle, '')
+    xbmcplugin.setPluginCategory(handle, COLOR1('Restore Backup'))
+
+    build_backups = _backup_files()
+
+    if not build_backups:
+        liz = xbmcgui.ListItem(label=COLOR2('No Backups Found'))
+        liz.setArt({'fanart': addon_fanart, 'icon': addon_icon, 'thumb': addon_icon})
+        liz.setProperty('IsPlayable', 'false')
+        xbmcplugin.addDirectoryItem(handle=handle, url='', listitem=liz, isFolder=False)
+        return
+
     for build in build_backups:
-        add_dir(str(build.stem), str(build), 15, addon_icon, addon_fanart, str(build.name), isFolder=False)
+        restore_url = _plugin_url(MODE_RESTORE, build)
+        delete_url = _plugin_url(MODE_DELETE, build)
+
+        liz = xbmcgui.ListItem(label=_backup_label(build))
+        liz.setArt({'fanart': addon_fanart, 'icon': addon_icon, 'thumb': addon_icon})
+        # No video infolabels: keeps Kodi from treating the backup as playable media.
+        liz.setProperty('IsPlayable', 'false')
+        liz.addContextMenuItems([
+            ('Restore Backup', f'RunPlugin({restore_url})'),
+            ('Delete Backup', f'RunPlugin({delete_url})'),
+        ])
+        xbmcplugin.addDirectoryItem(handle=handle, url=restore_url, listitem=liz, isFolder=False)
+
+def delete_backup(zippath):
+    if not zippath:
+        return False
+
+    backup = Path(zippath)
+    if not backup.is_file():
+        return xbmcgui.Dialog().ok('Delete Backup', 'Backup Not Found')
+
+    heading = 'Delete Backup'
+    message = f'Are you sure you wish to permanently delete\nthis backup?\n\n{backup.name}'
+    try:
+        confirm = xbmcgui.Dialog().yesno(heading, message, nolabel='No', yeslabel='Yes',
+                                         defaultbutton=xbmcgui.DLG_YESNO_NO_BTN)
+    except (AttributeError, TypeError):
+        confirm = xbmcgui.Dialog().yesno(heading, message, nolabel='No', yeslabel='Yes')
+
+    if confirm is not True:
+        return False
+
+    try:
+        backup.unlink()
+    except OSError as e:
+        xbmc.log(f'Unable to delete backup {str(backup)}: {e}', xbmc.LOGERROR)
+        return xbmcgui.Dialog().ok(heading, 'Backup Could Not Be Deleted')
+
+    xbmcgui.Dialog().notification(addon_name, 'Backup Deleted', addon_icon, 3000)
+    xbmc.executebuiltin('Container.Refresh')
+    return True
 
 def restore_build(zippath):
     restore = xbmcgui.Dialog().yesno('Restore', 'Are you sure you wish to wipe \ncurrent data and restore from backup?')
