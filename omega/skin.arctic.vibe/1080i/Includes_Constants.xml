@@ -13,6 +13,53 @@
     <constant name="view_row_hitrect_y">586</constant>
     <constant name="view_row_hitrect_y_shifted">726</constant>
 
+    <!-- SKINMOD: Wall grid vertical geometry. 0/0 = full bleed, which at the 350 row
+         pitch is exactly three rows (3 x 350 = 1050 of 1080).
+
+         Horizontal is deliberately absent: the wall panel spans the full 1920 and the
+         grid is centred by the offset_x (view_offx, 80) inset that List_Core applies to
+         each itemlayout. Do not add wall_left / wall_right - see MOD_CHANGELOG 21e. -->
+    <constant name="wall_top">0</constant>
+    <constant name="wall_bottom">0</constant>
+
+    <!-- SKINMOD: Wall Kaleido (view 521) info panel geometry. See MOD_CHANGELOG section 23.
+
+         All of these are derived from the poster grid and MUST be recomputed together if
+         view_poster_item_w / view_poster_itemlayout_w / view_poster_item_h ever change.
+         Kodi constants cannot do arithmetic, so the sums are recorded in the comments.
+
+         Coordinate space: these are relative to the ORIGIN POSTER'S artwork box, i.e. the
+         group that List_Core insets by offset_x / offset_y. In that space the poster runs
+         x 0 -> 217.14 (view_poster_item_w) and y 0 -> 310 (view_poster_item_h). -->
+
+    <!-- Visible panel = exactly three column pitches: 3 x 257.14. With the panel's visible
+         left edge on the origin poster's right edge, its right edge lands exactly on the
+         right edge of the third poster along. -->
+    <constant name="kaleido_panel_w">771.42</constant>
+    <constant name="kaleido_panel_h">310</constant>
+
+    <!-- How far the panel runs UNDER the origin poster so it appears to die into it.
+         Must be >= the 20px border used by common/dialog.png, or the rounded corner on the
+         poster side will still be visible. 40 leaves 20px of margin. Must also stay below
+         view_poster_item_w (217.14) or the panel would emerge from the poster's far side. -->
+    <constant name="kaleido_tuck">40</constant>
+
+    <!-- Drawn width = visible + tuck. 771.42 + 40 -->
+    <constant name="kaleido_ext_w">811.42</constant>
+
+    <!-- Right-sliding variant (columns 0-3): group left edge = poster right edge - tuck.
+         217.14 - 40 -->
+    <constant name="kaleido_right_x">177.14</constant>
+
+    <!-- Left-sliding variant (columns 4-6): group left edge = -(3 x 257.14), so the group
+         spans -771.42 -> +40 and the trailing 40 sits under the poster. -771.42 -->
+    <constant name="kaleido_left_x">-771.42</constant>
+
+    <!-- Content inset. On the tucked side the content must clear the tuck as well as the
+         padding: 40 + 40. -->
+    <constant name="kaleido_pad">40</constant>
+    <constant name="kaleido_pad_tucked">80</constant>
+
     <constant name="view_menu_main">480</constant>
     <constant name="-view_menu_main">-480</constant>
     <constant name="view_menu_mini">120</constant>
@@ -37,6 +84,32 @@
     <constant name="view_osd_l">240</constant>  <!-- 80 -->
     <constant name="view_osd_r">240</constant>  <!-- 360 -->
     <constant name="view_gutter">-10</constant>
+
+    <!-- SKINMOD: backdrop panel behind the bottom furniture strip (sort/view buttons and the
+         A-Z jump letters). See MOD_CHANGELOG 22.
+
+         _t and _h are relative to the Dimension_Furniture_Gutters group, which is 60px tall and
+         sits at y950-1010. _x is inset from that group's edges (screen x80 / x1840).
+
+             top  -40  ->  y  910          x inset 60  ->  screen x 140
+             + h  130  ->  y 1040                          screen x 1780
+
+         The selectable ink of BOTH strips is y940-1020, centre 980:
+           * sort buttons  - the grouplist box is y900-1060, but circlebutton.png carries 40px
+             of transparent alpha padding, so the visible pill is only y940-1020.
+           * alphabet jump - two rows of 40px letters, y940-1020.
+         The panel therefore centres on 975, not on the gutters group's own 980 midpoint, which
+         is what made the buttons sit low against the previous y870-1050 slab.
+
+         The faint typed-letter echo above the letters inks y900-930 and now overhangs the top
+         by ~10px. To enclose it instead, use -50 / 150.
+
+         _x cannot go much past 60. Button ink width grows 240px per visible button and reaches
+         screen x160-1700 at seven (library + Player.HasMedia), so 60 leaves only 20px of
+         padding in that worst case and 100 would clip it. See MOD_CHANGELOG 22d. -->
+    <constant name="view_furniture_dialog_t">-40</constant>
+    <constant name="view_furniture_dialog_h">130</constant>
+    <constant name="view_furniture_dialog_x">60</constant>
 
     <!-- Settings Dialogs -->
     <constant name="settings_category_w">400</constant>

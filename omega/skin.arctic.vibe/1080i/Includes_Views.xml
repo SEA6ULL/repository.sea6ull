@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <includes>
     <include name="View_MediaWindows_ID">
-        <views>50,51,52,53,54,57,58,59,500,510,520,530,540,560,570,580,590,502,512,522,532,542,572,582,592,550,551,552,553,554,555,561,557,558</views>
+        <views>50,51,52,53,54,57,58,59,500,510,520,521,530,540,560,570,580,590,502,512,522,532,542,572,582,592,550,551,552,553,554,555,561,557,558</views>
     </include>
 
     <include name="View_Row_Header">
@@ -78,14 +78,18 @@
         <control type="group">
             <visible>!Integer.IsEqual(Container.NumItems,0)</visible>
 
+            <!-- SKINMOD: wall-view header removed so the grid can run full-bleed.
+                 Was: Furniture_Top_Left (the big section title, ~y70-130) plus an
+                 Info_Viewline breadcrumb at top 170. Exp_View_HasHeader is true only for
+                 wall views in media windows, so this block was the wall's entire header.
+
+                 The empty group is deliberately KEPT rather than deleted: the third branch
+                 of this include is gated on !Exp_View_HasHeader and draws the row-view
+                 Info_Panel (plot/details). Deleting the group here would be harmless, but
+                 flipping the expression to False - the other obvious way to kill the header
+                 - would switch that branch on and drop a details panel over the wall grid. -->
             <control type="group">
                 <visible>$EXP[Exp_View_HasHeader]</visible>
-                <include>Furniture_Top_Left</include>
-                <control type="group">
-                    <include content="Info_Viewline">
-                        <param name="top">170</param>
-                    </include>
-                </control>
             </control>
 
             <control type="group">
@@ -215,6 +219,8 @@
         <include condition="$EXP[Exp_View_500_Include]">View_500_Square_Wall</include>
         <include condition="$EXP[Exp_View_510_Include]">View_510_Landscape_Wall</include>
         <include condition="$EXP[Exp_View_520_Include]">View_520_Poster_Wall</include>
+        <!-- SKINMOD: Wall Kaleido. See MOD_CHANGELOG section 23. -->
+        <include condition="$EXP[Exp_View_521_Include]">View_521_Kaleido_Wall</include>
         <include condition="$EXP[Exp_View_530_Include]">View_530_Circle_Wall</include>
         <include condition="$EXP[Exp_View_540_Include]">View_540_Overview_Wall</include>
         <include condition="$EXP[Exp_View_560_Include]">View_560_Ring_Wall</include>
@@ -279,6 +285,8 @@
                 <include>Dimension_Bottombar</include>
                 <control type="group">
                     <include>Dimension_Furniture_Gutters</include>
+                    <!-- SKINMOD: must stay first in this group so it draws behind the strips. -->
+                    <include>View_Furniture_Bottom_DialogPanel</include>
                     <include>View_Sorting_Buttons</include>
                     <include>View_Scrollbar_Count</include>
                     <include>View_Scrollbar_Strip</include>
@@ -287,6 +295,46 @@
                 </control>
             </control>
         </control>
+    </include>
+
+    <!-- SKINMOD: dialog-window backdrop for the bottom furniture strip. See MOD_CHANGELOG 22.
+
+         The sort/view buttons and the A-Z jump letters are drawn straight onto the view, with
+         nothing behind them. Once the row views moved down 140px (MOD_CHANGELOG 8a) they landed
+         on top of the artwork and became hard to read. This draws a panel behind them.
+
+         Nothing is repositioned - this is purely a backdrop.
+
+         It reuses Dialog_Background_Blur from Includes_Dialogs.xml, the same include every real
+         dialog window goes through, so it follows Skin.String(Background.DialogImage) - the
+         user's Dialog Colour setting - with no new setting of its own, including the Adaptive
+         theme's blurred-artwork fill and $VAR[Color_DialogBorder] for the outline.
+
+         Width is inset from the furniture gutter by view_furniture_dialog_x, so it still follows
+         the per-aspect-ratio constant overrides. It cannot hug the buttons: CGUIControlGroupList
+         draws children via SetOrigin, so each button advances the list 240px while its visible
+         pill is only 120px wide, and the visible button count swings between three and seven
+         depending on Container.CanFilterAdvanced, Player.HasMedia, plugin vs library and
+         MyPlaylist mode - an ink width of 580px to 1540px. Kodi will not take a $VAR in a
+         <width> tag, so the width has to be fixed at the worst case. See MOD_CHANGELOG 22d. -->
+    <include name="View_Furniture_Bottom_DialogPanel">
+        <param name="visible">$EXP[Exp_View_FurnitureDialog_IsVisible]</param>
+        <param name="diffuse">diffuse/dialog_w960_h200.png</param>
+        <definition>
+            <control type="group">
+                <visible allowhiddenfocus="true">$PARAM[visible]</visible>
+                <left>view_furniture_dialog_x</left>
+                <right>view_furniture_dialog_x</right>
+                <top>view_furniture_dialog_t</top>
+                <height>view_furniture_dialog_h</height>
+                <include content="Dialog_Background_Blur">
+                    <param name="shadow">true</param>
+                    <!-- Only consumed by the Adaptive branch, which masks the blurred artwork
+                         layer. 960x200 is the closest aspect in Textures.xbt to this bar. -->
+                    <param name="diffuse">$PARAM[diffuse]</param>
+                </include>
+            </control>
+        </definition>
     </include>
 
     <include name="View_Sorting_Buttons">
@@ -547,7 +595,13 @@
         <control type="group">
             <include content="View_Furniture_Bottom_ViewLine">
                 <param name="label">$LOCALIZE[31135]$INFO[Container.CurrentPage, , $LOCALIZE[20163] ]$INFO[Container.NumPages]</param>
-                <param name="visible">$EXP[Exp_View_ScrollFilter_HasFocus]</param>
+                <!-- SKINMOD: suppressed while the dialog panel is up. See MOD_CHANGELOG 22h.
+                     Exp_View_ScrollFilter_HasFocus also fires for the sort buttons and the A-Z
+                     jump, so the counter used to appear alongside them. It renders at top 10 /
+                     height 40 (y960-1000), right-aligned - i.e. inside the panel, not outside
+                     it - so shrinking the panel does not hide it. It still shows for actual
+                     scrollbar focus, which is where a page number is useful. -->
+                <param name="visible">[$EXP[Exp_View_ScrollFilter_HasFocus] + !$EXP[Exp_View_FurnitureDialog_IsVisible]]</param>
                 <param name="align">right</param>
             </include>
         </control>

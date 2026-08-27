@@ -366,6 +366,9 @@
                 <include>Dimension_Bottombar</include>
                 <control type="group">
                     <include>Dimension_Furniture_Gutters</include>
+                    <!-- SKINMOD: same backdrop as the library views. Must stay first in this
+                         group so it draws behind. See MOD_CHANGELOG 22. -->
+                    <include>View_Furniture_Bottom_DialogPanel</include>
                     <include content="Object_Hidden_Button">
                         <param name="id">610</param>
                         <onup>50</onup>

@@ -32,6 +32,20 @@
         </include>
     </include>
 
+    <!-- SKINMOD: Kaleido Wall. Wall Poster plus a sliding info panel on the focused item.
+         Deliberately routed through the same View_Wall_Include as every other wall view so
+         it inherits the full-bleed geometry from section 21 and cannot drift from it. The
+         only difference is List_Kaleido_Row in place of List_Poster_Row.
+         Wall Poster (520) is untouched. See MOD_CHANGELOG section 23. -->
+    <include name="View_521_Kaleido_Wall">
+        <include content="View_Wall_Include">
+            <param name="id">521</param>
+            <param name="include">List_Kaleido_Row</param>
+            <param name="viewtype_label">$LOCALIZE[31605]</param>
+            <param name="visible">$EXP[Exp_View_521]</param>
+        </include>
+    </include>
+
     <!-- Circle Wall -->
     <include name="View_530_Circle_Wall">
         <include content="View_Wall_Include">
@@ -121,8 +135,20 @@
                         <param name="orientation">vertical</param>
                         <param name="offset_y">40</param>
                         <preloaditems>0</preloaditems>
-                        <top>200</top>
-                        <bottom>140</bottom>
+                        <!-- SKINMOD: was top 200 / bottom 140, a 740px band that fit only two
+                             350px rows. The 200 reserved space for the wall-only header (now
+                             removed in View_Row_Info); the 140 reserved space for a footer this
+                             mod had already emptied - every remaining bottom control is
+                             focus-gated, so nothing persistent lived there. 0/0 = three rows.
+
+                             DO NOT add left/right here. The panel is meant to span the full
+                             1920: List_Core insets each itemlayout by offset_x (view_offx, 80),
+                             which already centres the grid - first artwork at x80, last ending
+                             at x1840, 80px margins both sides. Insetting the panel as well
+                             double-counts and pushes the last column off the right edge.
+                             See MOD_CHANGELOG section 21e. -->
+                        <top>wall_top</top>
+                        <bottom>wall_bottom</bottom>
                         <onleft>600</onleft>
                         <onright>611</onright>
 

@@ -34,6 +34,11 @@
     <expression name="Exp_View_510_Include">False</expression>
     <expression name="Exp_View_520">[False]</expression>
     <expression name="Exp_View_520_Include">False</expression>
+    <!-- SKINMOD: Wall Kaleido. Same False-until-rebuilt pattern as every other
+         wall view; the real expressions come from skinviewtypes.json via the
+         buildviews generator. See MOD_CHANGELOG section 23. -->
+    <expression name="Exp_View_521">[False]</expression>
+    <expression name="Exp_View_521_Include">False</expression>
     <expression name="Exp_View_530">[False]</expression>
     <expression name="Exp_View_530_Include">False</expression>
     <expression name="Exp_View_540">[False]</expression>

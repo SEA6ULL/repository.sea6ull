@@ -1379,6 +1379,715 @@ outstanding. `kodi.log` remains complete either way.
 
 ---
 
+## 21. Wall views run full-screen; wall header removed
+
+### 21a. The wall band was sized for chrome that no longer exists
+
+`View_Wall_Include` positioned the grid at `top 200` / `bottom 140` — a 740px band. At the
+350px row pitch shared by nine of the eleven wall views that fits exactly **two rows**
+(2 x 350 = 700). Ring was the visible exception at four rows, because it is the one wall view
+with its own pitch (175).
+
+The 200 reserved space for the wall-only header. The 140 reserved space for a footer that
+**this mod had already emptied** in section 5 — `Furniture_Bottom_Left` and
+`Furniture_Bottom_Right` are stubs, and every remaining bottom control (sort buttons 8000,
+page counter, scrollbar strip, alphabet filter, hint text) is focus-gated behind
+`Exp_View_ScrollFilter_HasFocus` or `allowhiddenfocus` visibility. Nothing persistent lived in
+that 140px. It was dead reserve.
+
+Both are now zero, so the grid is full-bleed and shows **three rows**. Artwork rows land at
+y40-350, y390-700 and y740-1050, leaving a 40px top and 30px bottom margin.
+
+### 21c. Header removed without waking the row-view info panel
+
+`Exp_View_HasHeader` is `Exp_View_IsMedia + Exp_View_WallMode` — true only for wall views in
+media windows. In `View_Row_Info` it gated a group containing `Furniture_Top_Left` (the section
+title, ~y70-130) and an `Info_Viewline` breadcrumb at `top 170`. That group is now empty.
+
+**The obvious approach — forcing the expression to `False` — is wrong.** The third branch of
+`View_Row_Info` is gated on `!$EXP[Exp_View_HasHeader]` and draws the row-view `Info_Panel`
+(plot / details). Flipping the expression would switch that branch on and drop a details panel
+over the wall grid. The expression is left intact and the group left in place, emptied.
+
+### 21d. Total scope
+
+Vertical only. Three files, two of them one-liners:
+
+| File | Change |
+|---|---|
+| `Includes_Constants.xml` | 2 new constants: `wall_top` 0, `wall_bottom` 0 |
+| `Includes_Views_Wall.xml` | `<top>` / `<bottom>` swapped for those constants |
+| `Includes_Views.xml` | wall header group emptied |
+
+`Includes_Items.xml` and `Includes_Lists.xml` are byte-identical to the pre-mod originals.
+
+### 21e. REVERTED — two failed attempts, recorded so they are not retried
+
+Both shipped broken, both were caught on hardware, both are fully backed out.
+
+**(1) Threading dimension params through `View_Wall_Include`.** An earlier revision passed
+`item_w` / `item_h` / `itemlayout_w` / `itemlayout_h` through the wall include to make row pitch
+tunable and to offer an optional 8-column "dense" wall behind `Skin.HasSetting(View.WallDense)`.
+The params were declared empty (`<param name="itemlayout_w" />`) and forwarded unconditionally,
+on the assumption that a passed-but-empty param falls through to the callee's declared default.
+
+**It does not — the empty value wins.** With `itemlayout_w` empty, Kodi fell back to the panel
+width and laid out a single 1800px-wide column, stretching every poster across the screen.
+
+The reasoning that produced it: `Widget_Content` writes
+`<param name="item_h">$PARAM[item_h]</param>` with `item_h` undefined (its caller `_Widget_Row`
+never sets it) and passes that into `List_Square_Row`, which declares defaults; square widgets
+render correctly, so empty appeared to fall through. That inference was wrong and was never
+tested on hardware before shipping.
+
+The same revision promoted `List_Poster_Row` and `List_Overview_Row` from hardcoded dimensions
+to params. Since `Widget_Content` passes those four params empty to whatever list include a
+widget uses, this also broke **home-screen poster widgets**, not just the wall. Both includes
+have been restored to their original hardcoded form.
+
+*Consequence:* row pitch is **not** adjustable from `View_Wall_Include`. Changing it means
+editing `view_poster_itemlayout_h` (350), which is shared with the row views, hub widgets and
+combined views, and would move all of those too.
+
+**(2) Insetting the panel horizontally.** A second revision added `left 60` / `right 60` on the
+theory that every wall view's `itemlayout_w` divides 1800 exactly (257.14 x 7, 450 x 4,
+600 x 3, 360 x 5), so a full-width 1920 panel must be leaving a dead ~120px column on the right.
+
+**That analysis missed `offset_x`.** `List_Core` gives each itemlayout
+`<left>$PARAM[offset_x]</left>` — `view_offx`, 80 — so artwork is already shifted 80px right
+inside its slot. In the original full-width panel the first poster sits at x80 and the last runs
+1622.86-1840: **80px margins on both sides, already centred.** The surplus 120 is not dead space
+at the right, it is the 80px inset plus the 40px trailing gutter.
+
+Insetting the panel double-counted it. The grid shifted to 140-1900, giving a visibly wide left
+margin and a right margin of only 20px, which TV overscan then ate into — the last column
+rendered about three-quarters visible.
+
+*Rule for both:* **the wall panel takes `top` and `bottom` and nothing else.** Its horizontal
+placement is already correct and is governed by `offset_x`, not by the panel bounds.
+
+### 21f. Why there is no peek at row four
+
+Three rows at 350 pitch is 1050 of 1080. The remaining 30px is **smaller than the 40px cell
+gutter**, so row four's artwork begins at y1090 — ten pixels below the bottom edge. No `top` /
+`bottom` tuning produces a peek:
+
+* `top 0` — artwork rows at 40-350, 390-700, 740-1050. Nothing left.
+* `top -40` — artwork flush to the top edge, 30px peek. Cramped top row for a sliver.
+* `top -50` — 40px peek, but the top row is clipped by 10px.
+
+`Layout_Poster` uses `aspectratio=scale` against a fixed `poster_w217_h310.png` diffuse mask, so
+artwork height cannot move without width moving with it. With gutters held at a uniform 40px and
+7 columns, `item_w` is pinned at 217.14 and therefore `item_h` at 310. A peek requires giving up
+either gutter uniformity or column count. **Three rows, no peek, is the accepted final layout.**
+
+### 21g. Pre-existing issue noted, not changed
+
+`View_Wall_Include` passes `<preloaditems>0</preloaditems>` as nested content, but `List_Core`
+writes `<preloaditems>$PARAM[preloaditems]</preloaditems>` (default 2) *after* its `<nested />`,
+so the later element wins and the wall preloads 2. This predates the mod. Left alone — changing
+it has scroll-performance implications worth measuring separately.
+
+---
+
+## 22. Dialog backdrop behind the bottom furniture strip
+
+### 22a. The problem
+
+The sort/view button row and the A-Z jump letters are drawn straight onto the view with nothing
+behind them. That was survivable while the row views sat at `view_row` 510; after section 8a
+moved them to 650 — and after section 21 made the wall grid full-bleed, putting artwork at
+y740-1050 — both strips landed on top of artwork and became hard to read. The controls
+themselves work correctly; this is purely a legibility fix.
+
+Neither strip is a real Kodi window. Both live in `View_Furniture_Bottom`
+(`1080i/Includes_Views.xml`), inside `Dimension_Bottombar` → `Dimension_Furniture_Gutters`:
+
+* `View_Sorting_Buttons` — grouplist `8000` (View / Sort / Order / Watched / Filter /
+  Update Library / Addon Settings / Fullscreen, plus the MyPlaylist set).
+* `View_Alphabet_Filter` — edit `19`, letter panel `600`, autocomplete `601`.
+
+### 22b. What was added
+
+A new `View_Furniture_Bottom_DialogPanel` include, placed **first** in the gutters group so it
+draws behind everything else. Nothing was repositioned.
+
+It reuses `Dialog_Background_Blur` from `Includes_Dialogs.xml` — the same include every real
+dialog window resolves through — so it follows `Skin.String(Background.DialogImage)`, the user's
+Dialog Colour setting, with **no new setting of its own**. That covers all nine themes including
+Adaptive's blurred-artwork fill, plus `$VAR[Color_DialogBorder]` for the outline and
+`Skin.HasSetting(Glass.DarkPanels)` / `Glass.EnableBorders`.
+
+Wired into two call sites:
+
+* `Includes_Views.xml` — `View_Furniture_Bottom` (all library views).
+* `Includes_Views_PVR.xml` — `View_PVR_Menu`, which carries its own copy of the same strip.
+
+### 22c. Geometry
+
+```xml
+<constant name="view_furniture_dialog_t">-40</constant>
+<constant name="view_furniture_dialog_h">130</constant>
+<constant name="view_furniture_dialog_x">60</constant>
+```
+
+`_t` and `_h` are relative to the `Dimension_Furniture_Gutters` group: 60px tall at y950-1010
+(`Dimension_Bottombar` sets it 80px off the bottom at 40px tall, then the gutters bleed 10px each
+way). `_x` insets from that group's edges. So the panel spans **y910-1040, screen x140-1780**.
+
+The selectable ink of **both** strips is y940-1020, centre **980**:
+
+| Strip | Nominal box | Actual ink |
+|---|---|---|
+| Sort buttons | grouplist 160 tall on `centertop 50%` → y900-1060 | **y940-1020** |
+| Alphabet jump | panel `600`, two rows of 40px letters | **y940-1020** |
+
+The sort row's nominal box is misleading. Its focus texture is
+`Texture_CircleButtonDialog_Highlight_Focus_V` → `common/circlebutton.png`, a 160x160 texture
+whose alpha bounding box is only `(40, 40, 120, 120)` — 40px of transparent padding on every
+side. So the visible pill inks 40px inside the 200x160 button rect, not the full rect.
+
+**First pass got this wrong.** It sized the panel y870-1050 on the assumption that the alphabet
+block's ink started at y900, giving a centre of 960 against ink centred on 980 — the buttons and
+letters visibly sat ~20px below the midpoint. The panel now centres on 975.
+
+#### The typed-letter echo
+`View_Alphabet_Filter` draws a faint `main_fg_30` label above the letters showing the first
+character of edit `19` (`top -40`, height 40). At `font_main` 30px it inks **y900-930**, so it
+now overhangs the panel top by ~10px. It is decorative and duplicates the bold + underlined
+highlight already on the selected letter in the panel, so it was left alone rather than moved.
+There is no room to tuck it inside: the only clear band is y910-940, and a 30px glyph there
+would collide with the first row of letters. Set `_t -50` / `_h 150` to enclose it instead, at
+the cost of 20px of height and 5px of centring.
+
+### 22d. Why the panel is not sized to the buttons
+
+It cannot hug them. Confirmed against `CGUIControlGroupList::Process`, which positions children
+with `SetOrigin(m_posX + pos, m_posY)` — children keep their own `posX` as an *additional* offset,
+and the list advances by `Size(control)`. Each `DialogInfo_Button` emits **two** controls, a 200px
+button (`back_width`, which wins over `back_size` because Kodi's `GetDimension` uses
+`FirstChildElement`) and a 40px icon group, so each button advances the list 240px while its
+visible pill is only 120px wide.
+
+Visible button count then swings with context, and the ink width with it:
+
+| Buttons | Ink (screen x) | Width | Context |
+|---|---|---|---|
+| 3 | 640-1220 | 580 | MyPlaylist subset |
+| 4 | 520-1340 | 820 | plugin / basic list |
+| 5 | 400-1460 | 1060 | library, no advanced filter |
+| 6 | 280-1580 | 1300 | library — View/Sort/Order/Watched/Filter/Update |
+| 7 | 160-1700 | 1540 | + Fullscreen (`Player.HasMedia`) |
+
+Kodi will not accept a `$VAR` in a `<width>` tag, so a content-following width is not
+expressible; the panel has to be fixed at the worst case. A per-count stack of fixed-width images
+gated on the same visibility conditions was considered and rejected as too fragile.
+
+**`_x` therefore cannot go much past 60.** At 60 the panel is x140-1780, which still clears the
+seven-button case with 20px to spare. At 100 it clips it. `_x` 0 (the original full-gutter width)
+through 60 are all safe; anything above 60 trades the `Player.HasMedia` case for a smaller panel.
+
+`left`/`right` insets were kept in preference to a centred fixed `<width>` so the panel continues
+to inherit the per-aspect-ratio constant overrides.
+
+### 22e. Visibility gate
+
+```xml
+<expression name="Exp_View_FurnitureDialog_IsVisible">[$EXP[Exp_View_SortModeButtons_HasFocus] | Control.HasFocus(19) | Control.HasFocus(600) | Control.HasFocus(601)]</expression>
+```
+
+Deliberately narrower than the existing `Exp_View_ScrollFilter_HasFocus`, which was the obvious
+candidate but wrong twice over:
+
+* It includes the **vertical** scrollbars `64`/`65`/`66`/`611`, which are on the right edge and
+  have nothing to do with this strip.
+* It includes `610`. In `View_PVR_Menu` that control bounces focus straight to `8000`, but the
+  library views' copy in `View_Hidden_Buttons` has three *conditional* `onfocus` branches and
+  **none of them fire** when `Exp_IsAlphabetStrip` is true and `Container.NumPages` is not 1 — so
+  `610` retains focus as the left/right letter-scrubbing state. `View_Alphabet_Filter` does not
+  show for `610`, so including it would raise an empty panel.
+
+The horizontal scrollbar `60` is also excluded: it is thin, self-contained furniture that reads
+acceptably against artwork.
+
+### 22f. The `diffuse` parameter
+
+`diffuse/dialog_w960_h200.png` is passed through. It is consumed **only** by the Adaptive branch
+(`Dialog_Background_Blur_Adaptive`), where it masks the blurred-artwork layer; the eight fixed
+colour themes go through `Dialog_Background_Blur_Standard` and ignore it. 960x200 (4.8:1) is the
+closest aspect available in `media/Textures.xbt` to this ~9.8:1 bar — the corner curves stretch
+horizontally, which is not visible at this size. The base `common/dialog.png` is a 64x64 texture
+drawn with `border="20"`, so the rounded corners are texture-space and stay correct at any size.
+
+`transparency` is intentionally not passed. Kodi's `ResolveParametersForNode` removes a
+`<param>` that forwards an undefined `$PARAM[...]` to a nested include, precisely so the nested
+default (`false`) is picked up rather than being overridden with an empty string.
+
+### 22g. Tuning
+
+The panel is top-anchored, so `_h` alone extends it *downward* toward the screen edge. To grow it
+upward, lower `_t` and raise `_h` by the same amount. To shift it without resizing, change `_t`
+alone. `_x` is symmetric; see the ceiling in 22d.
+
+### 22h. Page counter suppressed while the panel is up
+
+`View_Scrollbar_Count` was gated on `Exp_View_ScrollFilter_HasFocus`, which also fires for the
+sort buttons and the A-Z jump — so "Page 1 of 3" appeared alongside them. It is furniture that is
+otherwise never on screen, and it does not belong in a selection dialog.
+
+Shrinking the panel does not hide it. It renders through `Info_Viewline` at `top 10` / height 40,
+right-aligned inside the same gutters group — **y960-1000**, i.e. dead centre of the panel's own
+vertical band, hard against its right edge. It needed an explicit gate:
+
+```xml
+<param name="visible">[$EXP[Exp_View_ScrollFilter_HasFocus] + !$EXP[Exp_View_FurnitureDialog_IsVisible]]</param>
+```
+
+It still shows for genuine scrollbar focus (`60`, `64`/`65`/`66`, `611`), which is the case where
+a page number is actually useful.
+
+#### Left alone
+`View_Hint_Text` ("press left/right to jump") is gated on `Exp_View_ScrollFilterHorz_HasFocus`,
+which includes `19`/`600`/`601`, so it accompanies the A-Z strip. It sits at `centerbottom -50`,
+below the panel. It was left as-is — it is guidance rather than stray furniture — but it is
+outside the panel and can be suppressed the same way if it reads as clutter.
+
+---
+
+## 23. Wall Kaleido — new viewtype 521 with a sliding info panel
+
+A second poster wall that shows Title / Plot / Ratings / Duration in a panel that slides out
+of the focused poster after three seconds. **Wall Poster (520) is untouched** — Kaleido is an
+additional view, not a replacement, and both appear in the viewtype picker.
+
+### 23a. Why the panel lives inside the focusedlayout
+
+The obvious build is an overlay group placed beside the container, the way `Info_Panel` is
+used by the row views. That was rejected. An overlay would have to derive the focused cell's
+screen position itself — 3 rows x 7 columns = **21 positional variants**, all of which would
+have to be kept in sync with `view_poster_itemlayout_w/h` by hand — and it would draw *above*
+the whole container, including the poster it is supposed to emerge from.
+
+Declaring the panel inside the container's own `<focusedlayout>` solves three problems at once:
+
+1. **Position.** The layout is already drawn at the focused cell's origin. The panel needs no
+   row/column arithmetic at all, only a left/right direction choice.
+2. **Hover delay.** `CGUIBaseContainer::ProcessItem` calls `ResetAnimation(ANIM_TYPE_FOCUS)`
+   on the focused layout whenever the focused **item** changes. So an
+   `<animation ...>Focus</animation>` carrying `delay="3000"` restarts its countdown on every
+   d-pad move, for free. No `AlarmClock`, no window property, no script, no polling.
+3. **Z-order.** Containers render the focused item **last**, so the panel covers its
+   neighbours. Within the layout, controls render in document order, so declaring the panel
+   *before* `Layout_Poster` puts the origin poster on top of it.
+
+### 23b. "Dies into the poster"
+
+`common/dialog.png` is drawn with `border="20"` and rounds all four corners. Squaring off only
+the poster-side edge is not practical: for eight of the nine dialog themes the fill is a
+blurred PNG, so an overlaid patch would sample a visibly different colour.
+
+Instead the panel is drawn **40px wider than it is meant to look** (`kaleido_tuck`) and that
+surplus runs *underneath* the poster. Its poster-side rounded corners are hidden by the
+artwork; what remains visible is a straight cut emerging from behind the poster. The two
+exposed corners stay rounded, matching the rest of the skin. No new texture was needed.
+
+`kaleido_tuck` must stay **>= 20** (the dialog border, or the corner curve peeks out) and
+**< 217.14** (`view_poster_item_w`, or the panel would emerge from the poster's far side).
+40 sits in the middle of that range.
+
+#### Cosmetic note, not a defect
+`Layout_Poster` masks its artwork with `diffuse/poster_w217_h310.png`, which has rounded
+corners of its own, and `Object_ItemBack` behind it is only `main_fg_12` — semi-transparent.
+So a sliver of panel is visible through the poster's own corner curves on the tucked side.
+It reads as depth (the panel genuinely *is* behind the poster) and was left alone.
+
+### 23c. Geometry
+
+All in `Includes_Constants.xml`, all derived from the existing poster grid. Coordinates are
+relative to the artwork box that `List_Core` insets by `offset_x` / `offset_y`, in which the
+poster runs x 0-217.14 and y 0-310.
+
+| Constant | Value | Derivation |
+|---|---|---|
+| `kaleido_panel_w` | 771.42 | 3 x `view_poster_itemlayout_w` (257.14) — three column pitches |
+| `kaleido_panel_h` | 310 | = `view_poster_item_h`, i.e. exactly poster height |
+| `kaleido_tuck` | 40 | overlap hidden under the origin poster |
+| `kaleido_ext_w` | 811.42 | 771.42 + 40 |
+| `kaleido_right_x` | 177.14 | 217.14 - 40 |
+| `kaleido_left_x` | -771.42 | -(3 x 257.14) |
+| `kaleido_pad` | 40 | content inset, exposed side |
+| `kaleido_pad_tucked` | 80 | content inset, tucked side (40 pad + 40 tuck) |
+
+Three column pitches is what makes the far edge land *exactly* on the third poster's outer
+edge rather than in a gutter. Verified across all seven columns:
+
+| Column | Poster x | Panel x | |
+|---|---|---|---|
+| 0 | 80.00–297.14 | 297.14–1068.56 | right |
+| 1 | 337.14–554.28 | 554.28–1325.70 | right |
+| 2 | 594.28–811.42 | 811.42–1582.84 | right |
+| 3 | 851.42–1068.56 | 1068.56–1839.98 | right |
+| 4 | 1108.56–1325.70 | 337.14–1108.56 | left |
+| 5 | 1365.70–1582.84 | 594.28–1365.70 | left |
+| 6 | 1622.84–1839.98 | 851.42–1622.84 | left |
+
+Column 3 — the worst case — ends at 1839.98, which is the grid's own right margin (section 21e:
+artwork runs x80–1840). Nothing overhangs, on either side.
+
+**These constants are a set.** If `view_poster_item_w`, `view_poster_itemlayout_w` or
+`view_poster_item_h` ever move, all eight must be recomputed together. Kodi constants cannot do
+arithmetic (see Conventions), so the sums live only in the comments.
+
+### 23d. Direction
+
+Columns 0–3 slide right, columns 4–6 slide left, chosen by `Container(id).Column(n)` in the
+panel's `<visible>`. Both variants are always instantiated and are mutually exclusive.
+
+`Container(id).Column(n)` is a stock boolean condition, documented specifically for use inside
+item layouts. **It is used nowhere else in this skin**, so it is the one thing worth verifying
+on hardware before trusting the rest. Two fallbacks, in order of preference:
+
+1. Drop the id and use the bare `Container.Column(n)`.
+2. Enumerate `Container(id).Position(n)`. With 7 across and 3 rows visible the cursor runs
+   0–20, so column 0 is `Position(0) | Position(7) | Position(14)`, column 1 is
+   `Position(1) | Position(8) | Position(15)`, and so on. Verbose, but depends only on
+   `Container.Position`.
+
+### 23e. The animation — one animation, two effects
+
+```xml
+<animation type="Focus" reversible="false">
+    <effect type="fade"  start="0" end="100" delay="3000" time="150" />
+    <effect type="slide" start="±217.14,0" end="0,0" delay="3000" time="600" tween="sine" easing="out" />
+</animation>
+```
+
+#### The trap: stacked Focus animations silently drop all but the first
+The first two attempts wrote this as **two** sibling tags:
+
+```xml
+<animation effect="fade"  ...>Focus</animation>
+<animation effect="slide" ...>Focus</animation>
+```
+
+That does not work. Kodi queues Focus animations through `CGUIControl::QueueAnimation`, which
+calls `GetAnimation(ANIM_TYPE_FOCUS)` — and that returns only the **first** animation of the
+type. The slide was never queued, so the panel simply dissolved into place. Retuning the
+slide's `time`, distance and easing changed nothing observable, because the slide was not
+running at all. The reported symptom — "it's just appearing, like a fast dissolve" — was
+literally accurate, and the first diagnosis (easing front-loading the motion) was wrong.
+
+**This trap is specific to the QUEUED animation types** — Focus, Unfocus, Visible, Hidden.
+Multiple `Conditional` animations on one control are evaluated independently and work fine,
+which is why stacked `<animation>` tags look safe elsewhere in this skin. A sweep confirms no
+other control in the skin stacks two same-type Focus animations; every fade+slide combination
+uses the multi-effect form, e.g. `Custom_1143_OSD_NextOverlay.xml`.
+
+#### Timing is copied verbatim from the Options menu
+The values come straight from `Animation_Slide_In` in `Includes_Animations.xml`, which is what
+`Custom_1170_Dialog_HomeMenu.xml` uses via `Animation_Right_Delay`:
+
+| Effect | time | tween | easing |
+|---|---|---|---|
+| fade | 300 | sine | out |
+| slide | 400 | cubic | out |
+
+Three things make that smoother than the hand-rolled version it replaced (fade 150 untweened,
+slide 600 sine-out):
+
+* **The fade is eased and long.** An untweened 150ms fade snaps to opaque almost immediately,
+  so the travel that follows reads as a jump rather than a glide.
+* **Fade and slide are close in length** (300 vs 400), so the panel is visibly moving while it
+  is still coming up in opacity. Motion and appearance become one gesture instead of two.
+* **cubic-out decelerates harder than sine-out**, so the panel settles rather than drifts.
+
+This corrects an assumption in the earlier version of this section, which reasoned that the
+fade should be *short* to maximise "visible travel at full opacity". The Options menu shows the
+opposite reads better: you want to see the panel moving *through* the fade, not after it.
+
+Only the delay differs — the Options menu uses 400, ours is the 3000ms hover wait. Keep both
+effects' delays equal or the panel fades in before it starts moving.
+
+#### The distance is geometrically pinned
+`slide_start` is ±217.14 = `view_poster_item_w`, one poster width exactly. The panel is 811px
+wide against a 217px poster, so it can never hide fully behind its own poster — the fade
+conceals the start. What the distance actually controls is how far the panel's trailing edge
+overhangs its neighbour at t=0:
+
+| Variant | Trailing edge at slide start | Neighbour edge |
+|---|---|---|
+| right (cols 0–3) | 177.14 − 217.14 = **−40.00** | gutter is exactly 40 wide |
+| left (cols 4–6) | −771.42 + 217.14 + 811.42 = **257.14** | next poster starts at 257.14 |
+
+At maximum backward extension the panel exactly fills its own poster plus the gutter and stops
+dead on the neighbour's edge. It never covers an adjacent poster, in either direction, at any
+point in the animation.
+
+The Options menu travels 320px by comparison. Same timing over a shorter distance is simply
+gentler, which is the direction we want anyway.
+
+### 23f. CONTROL TYPE RESTRICTION — read before editing the panel
+
+Kodi only accepts `group` / `image` / `label` / `textbox` / `progress` / `multiimage` inside a
+container layout. **No `grouplist` and no `button`.** `Includes_Layouts.xml` contains zero
+grouplists, which is the same constraint showing up in the original skin.
+
+This rules out reusing `Info_Panel` and `Info_RatingsLine` wholesale: `Info_RatingsLine` is a
+`grouplist` of `button` controls (`Info_RatingsLine_Object` emits a button so the label can be
+`width auto`). Dragging either into the layout will silently drop controls at load.
+
+Consequences:
+
+* Title and Plot are plain textboxes fed by `$VAR[Label_Title]` / `$VAR[Label_Plot]` — the same
+  variables the row views use, and both read a bare `ListItem.`, which is exactly right inside
+  an item layout.
+* **Nothing can reflow.** Without a grouplist the plot's `top` is fixed, so the title must not
+  be allowed to change any other control's position. See 23m for how the title was made a
+  single line to close the gap this originally caused.
+* The ratings row cannot auto-flow, so it is **three fixed slots at a 150px pitch**, fed by
+  cascading variables that left-pack the available ratings — see below.
+
+### 23g. Ratings, without a grouplist
+
+Four candidates in priority order: Kodi (`ListItem.Rating`), TMDb, IMDb, Rotten Tomatoes
+critic. Presence of each is an expression; `Var_Kaleido_RatingN_Icon` / `_Label` then answer
+"what is the Nth *present* candidate", so the slots pack left with no gaps:
+
+* slot 1 = first present;
+* slot 2 = candidate *k* where **exactly one** candidate before *k* is present;
+* slot 3 = candidate *k* where **exactly two** are.
+
+The `Exp_Kaleido_Rating_One12` / `_One123` / `_Two123` expressions are those "exactly N of the
+first M" tests written out longhand. Slot visibility is the OR of that slot's own value
+conditions, so visibility and content can never disagree.
+
+Icons resolve through the existing `$VAR[Info_RatingsLine_Object_Style]`, so the panel honours
+the current **Colour ratings** setting (`Furniture.EnableColourRatings`) with no setting of its
+own. The icon box is a fixed 44x32 with `aspectratio keep`; `Info_RatingsLine_Object` gives
+IMDb `icon_w 52` because it can auto-flow, so here the wordmark scales down inside the box
+instead.
+
+**Note the mixed data sources.** `ListItem.Rating` is item-local; the other three are
+`Window(Home).Property(TMDbHelper.ListItem.*)` values that describe whatever is *currently*
+focused. That is correct here only because the panel is drawn for the focused item and nothing
+else. **Do not reuse these variables in an itemlayout** — every unfocused poster would show the
+focused item's ratings.
+
+### 23h. Duration
+
+`Var_Kaleido_Duration`, bottom-right. Same source order and the same `31074` "hr" / `31073`
+"mins" strings as the Duration block of `Info_Line`, so it reads identically to the row views.
+Resolves to empty for tvshows, seasons and folders, which is intended — the label just renders
+blank rather than showing a placeholder.
+
+### 23i. Panel colour — dialog background, not window background
+
+The panel resolves through `Dialog_Background_Blur`, the same include every real dialog window
+uses, so it follows `Skin.String(Background.DialogImage)` — the user's **Dialog Colour**
+setting — with no setting of its own. Section 22 already set this precedent for the bottom
+furniture strip.
+
+The window background was considered first and rejected. Three reasons:
+
+1. Both settings are **images**, not colours (`Background.Image` is a full-screen blurred JPG,
+   `Background.DialogImage` a dialog-sized blurred PNG). The wall grid already sits on the
+   window background, so a panel filled with the same image would be near-invisible against
+   its own backdrop.
+2. `Dialog_Background_Blur` is the skin's ready-made panel surface: rounded corners via
+   `common/dialog.png` at `border="20"`, outline via `$VAR[Color_DialogBorder]`, and
+   `Glass.DarkPanels` / `Glass.EnableBorders` handling. It is built purely from `image`
+   controls, which is *why* it is legal inside a container layout where `Info_Panel` is not.
+3. Dialog backgrounds have matched `dialog_fg_*` foreground colours tuned for contrast,
+   including under the Light-dialogs colour theme. The window background has no such pairing,
+   so text legibility would have been guesswork.
+
+Side benefit: under the **Adaptive** dialog theme the fill comes from blurred artwork, so the
+panel tints to whatever poster is being hovered.
+
+`diffuse/dialog_w1120_h400.png` (2.8:1) is passed as the diffuse — closest available aspect to
+the panel's 811x310 (2.6:1). Per section 22f it is consumed **only** by the Adaptive branch;
+the eight fixed themes ignore it. `transparency` is deliberately not passed, for the same
+reason given in 22f.
+
+### 23j. Navigation and select — deliberately no work done
+
+The requirement was that the panel must not trap focus: pressing select should behave exactly
+as it does on any other poster, and the d-pad should keep navigating without a Back press
+first.
+
+**This required no code.** The panel is decoration drawn inside the container's own layout. It
+is not a window, not a dialog, not a focusable control, and it never receives focus — the
+container keeps it throughout. So select, d-pad, context menu, `onleft` 600, `onright` 611 and
+`Action_View_Movement_OnBack` all remain stock, inherited unchanged from `View_Wall_Include`.
+
+Resist any temptation to "improve" this with `ActivateWindow` or a modal: that is precisely
+what would introduce the Back-press the requirement rules out. (Compare section 8b, where
+AF3's `<onleft>ActivateWindow(1171)</onleft>` was deliberately not copied.)
+
+### 23k. Layout param relay — do not add defaults
+
+`Layout_Kaleido` relays every param `List_Core` passes through to `Layout_Poster` **by name,
+without declaring defaults for them**. Unresolved `$PARAM[...]` forwards are dropped by Kodi's
+`ResolveParametersForNode`, so `Layout_Poster`'s own defaults apply — the same mechanism that
+already makes `icon` (`$VAR[Image_Poster]`) work through `List_Poster_Row` today.
+
+**Declaring empty defaults here instead would break the layout**, exactly as it broke the wall
+in section 21e: a passed-but-empty param wins over the callee's declared default.
+
+The two params `Layout_Kaleido` *does* declare — `focusedlayout` (false) and `selected` (false)
+— are the panel's gate, and neither is forwarded to `Layout_Poster` in a way that changes it.
+
+#### Why the gate is `focusedlayout + selected`
+`List_Core` emits the itemlayout include three times:
+
+| Copy | `focusedlayout` | `selected` | Shown when |
+|---|---|---|---|
+| plain `<itemlayout>` | unset → default false | false | item not focused |
+| `<focusedlayout>` copy A | true | false | container does **not** have focus |
+| `<focusedlayout>` copy B | true | true | container **has** focus |
+
+Only copy B should carry a panel. A second `<visible>Control.HasFocus(id)</visible>` on the
+panel group is belt-and-braces for the same thing.
+
+### 23l. Registration — the five places a new view has to be wired
+
+| File | Change |
+|---|---|
+| `Includes_Views_Wall.xml` | `View_521_Kaleido_Wall`, via the shared `View_Wall_Include` |
+| `Includes_Views_Wall_Kaleido.xml` | **new file** — panel, rating variables, direction chooser |
+| `Includes.xml` | loads the new file, immediately after `Includes_Views_Wall.xml` |
+| `Includes_Views.xml` | `521` added to `<views>`, and to `View_Row_Items_StandardViews` |
+| `Includes_Views_Fallbacks.xml` | `Exp_View_521` / `_Include`, both False |
+| `Includes_Expressions.xml` | `521` added to `Exp_View_WallMode` |
+| `Includes_Actions.xml` | `521` added to `Action_View_ContentID` / `_ContainerID` |
+| `Includes_Lists.xml` | `List_Kaleido_Row` |
+| `Includes_Layouts.xml` | `Layout_Kaleido` |
+| `shortcuts/skinviewtypes.json` | viewtypes map, icons map, and 13 `rules` arrays |
+| `language/.../strings.po` | `31605` "Wall Kaleido" |
+| `extras/viewtypes/wall-kaleido.jpg` | picker thumbnail |
+
+Adding `521` to `Exp_View_WallMode` is what gives Kaleido the vertical scrollbar
+(`Exp_View_Scrollbar_Maxi_V`) and the suppressed wall header (section 21c) for free.
+
+`Exp_View_521` ships as `False` in the fallbacks, matching every other wall view: the real
+expressions are generated from `skinviewtypes.json` by the `buildviews` generator. **Kaleido
+will not appear in the viewtype picker until a viewtype rebuild has run**, which is the same
+condition Wall Poster is already under.
+
+In `skinviewtypes.json`, `521` was inserted immediately after `520` in all 13 `rules` arrays
+that offer Wall Poster, so Kaleido is available for exactly the same content types and sits
+next to Wall Poster in the picker.
+
+#### On the id
+`521` is unused everywhere in the skin (verified by sweep). The `IDs` file nominally reserves
+`5X1` for "Wall View Control" — a convention `561` (Small Banner Wall) already breaks, and no
+`5X1` control exists for any wall view.
+
+### 23m. Title and plot spacing, and the plot scroll delay
+
+**The gap.** The title started as a two-line, top-aligned textbox 90px tall. A one-line title —
+the common case — therefore left a whole empty line between the title and the plot.
+
+Three fixes were considered and two rejected:
+
+* **Auto-height title** (`<height max="90">auto</height>`, which this Kodi build does support —
+  `Info_Title_Text` already uses it). Rejected: it shrinks the *title's own box*, but the plot's
+  `top` is fixed, so the gap stays exactly where it was.
+* **Bottom-anchor the text inside a two-line box.** Rejected: Kodi has no `aligny bottom`.
+  `CGUIControlFactory::GetAlignmentY` only understands `center`; anything else falls through to
+  top.
+* **Single-line title.** Adopted. It closes the gap in every case rather than the common one,
+  and hands the 45px it saves to the plot, which now gets **four lines instead of three**.
+
+#### The title truncates with an ellipsis — no scrolling
+One label, `<scroll>false</scroll>`. `GUIControlFactory` constructs that as
+`CGUIControl::NEVER`, which `CGUIListLabel` maps to `CGUILabel::OVER_FLOW_TRUNCATE` —
+documented in `GUILabel.h` as *"Truncated text from right (text end with ellipses)"*. The three
+dots come for free; there is no separate tag for them.
+
+**Do not drop the `<scroll>false</scroll>`.** Omitting `<scroll>` entirely is not equivalent:
+`GUIControlFactory` defaults a list label to `CGUIControl::FOCUS`, which scrolls whenever the
+item is focused — and inside a focusedlayout that means always. The explicit `false` is what
+holds the text still.
+
+#### What this replaced, and why it is worth recording
+Two earlier revisions are now gone. Both worked; both were rejected on looks.
+
+1. **Single-line textbox with `autoscroll delay`.** Takes a real delay, but a textbox scrolls
+   *vertically*, so long titles slid up to a second line.
+2. **Two overlapping labels — static below 7s, marquee above.** This was the only way to get a
+   horizontal marquee *with* a delay, and the reasoning behind it is worth keeping in case the
+   effect is ever wanted elsewhere in this skin:
+
+   * A label marquees sideways but has **no scroll delay**. Verified against Kodi source:
+     `GUIControlFactory` parses only `<scroll>`, `<scrollspeed>` and `<scrollsuffix>` for
+     labels, and the initial wait lives in `CScrollInfo` as a constructor default of 50 frames
+     (~0.8s) that is never read from XML. `<pauseatend>` is a `fadelabel` tag, and fadelabel is
+     unsupported inside a list container.
+   * So the delay has to come from visibility. `CGUIControl::DoProcess` calls `Process()` only
+     when `IsVisible()`, so a label hidden by a `<visible>` condition does not advance its
+     scroll and starts from the beginning when it appears. **This works only with `<visible>`** —
+     culling is separate (`m_transform.alpha <= 0.01f` does not stop `Process()`), so
+     cross-fading the two labels would have revealed a marquee already mid-text.
+   * The trigger was `System.IdleTime(7)`: there is no per-item timer inside a container layout,
+     but any input resets the idle clock and input is what moves focus between posters, so
+     "7 seconds idle" and "7 seconds hovering this poster" coincide on a remote.
+
+   Rejected because moving title text alongside the plot's autoscroll made the panel busy.
+   Truncation is quieter.
+
+Only the plot scrolls now: panel opens at **3s**, plot autoscrolls at **8s**, title never moves.
+
+#### Height 50
+One line of `font_head_bold`, which resolves to Inter-Bold or RobotoCondensed-Bold at size 38 or
+40 depending on the font preset — line heights 44.5 / 46.0 / 46.9 / 48.4px, all of which clear
+50. (The hazard that made this worth measuring belonged to the textbox version: a textbox
+computes `itemsPerPage` as `height / lineHeight` and renders *nothing* if the box is too small.
+A label has no such cliff, but the measurement still sets the row height.)
+
+Resulting vertical stack inside the 310px panel:
+
+| Band | y | Height |
+|---|---|---|
+| top pad | 0–28 | 28 |
+| title label | 28–78 | 50 |
+| plot, 4 × 40 | 78–238 | 160 |
+| gap | 238–244 | 6 |
+| ratings / duration | 244–284 | 40 |
+| bottom pad | 284–310 | 26 |
+
+**Plot height must stay a multiple of 40.** `Includes_Font.xml` quantises plotbox linespacing to
+a 40px grid deliberately, so any other value half-draws the last line.
+
+**Plot scroll delay is 8000, not 5000.** The skin default (`Includes_Defaults.xml`: delay 6000,
+time 3000, repeat 10000) counts from the moment the item is *focused* — the textbox starts
+accumulating immediately, because the panel group is `visible` from t=0 and only held at alpha 0
+by the Focus animation. So 3000 (panel delay) + 5000 gives five full seconds of readable, static
+plot **after** the panel has finished sliding out, which is what "5 second delay" means from the
+viewer's side. **If the 3000 hover delay changes, change this to match.** For five seconds from
+focus instead, use 5000.
+
+`time` and `repeat` are left at the skin defaults and the condition is the stock
+`!Skin.HasSetting(Textboxes.DisableAutoscroll)`, so the global "disable textbox autoscroll"
+setting still governs this panel.
+
+### 23n. Left deliberately in place
+
+* **Wall Poster (520)** — unchanged, still offered, still the default poster wall.
+* `List_Poster_Row` and `Layout_Poster` — untouched. `List_Kaleido_Row` is a sibling that
+  differs only in `itemlayout_include`, deliberately reusing the identical geometry constants
+  so the two cannot drift apart (the panel's placement is derived from them).
+* `preloaditems` — still the pre-existing 2 described in section 21g. The panel adds per-item
+  controls to the focusedlayout only, which Kodi clones on demand for the focused item, so the
+  preload cost is unchanged.
+
+### 23o. Version bumped to 1.0.5
+
+`addon.xml`. The Settings version line reads `System.AddonVersion(skin.arctic.vibe)`
+(section 11), so it follows automatically.
+
+---
+
 ## Validation performed after every change
 
 1. **XML well-formedness** across all files in `1080i/` (258 files at last count).
@@ -1404,7 +2113,17 @@ outstanding. `kodi.log` remains complete either way.
 | Combine Widgets un-shift | `Hub_Slide_Widgets_OnCombined` (`time` param) | `-hub_widgets_shift_y`, instant |
 | Row view vertical position | `view_row_shifted`, `view_row_hitrect_y_shifted` | 650 / 726 |
 | Fanart panel size | `flixart_size_w` / `_h` (base = Medium) | 1689 x 950 |
-| Wall grid geometry | `View_Wall_Include` `<top>` / `<bottom>` | 200 / 140 |
+| Wall grid vertical position | `wall_top` / `wall_bottom` (horizontal: do not set) | 0 / 0 |
+| Wall row pitch | `view_poster_itemlayout_h` — shared, moves row views too | 350 |
 | Default widget view | `widgets_row.xml` fallback rule | `List_Poster_Row` |
+| Bottom furniture backdrop | `view_furniture_dialog_t` / `_h` / `_x` (top-anchored; `_x` max 60) | -40 / 130 / 60 |
+| Kaleido panel size | `kaleido_panel_w` / `_h` (a set — see 23c) | 771.42 x 310 |
+| Kaleido tuck under poster | `kaleido_tuck` (+ `kaleido_ext_w`, `kaleido_right_x`, `kaleido_pad_tucked`) | 40 |
+| Kaleido hover delay | `delay="3000"` on **both** animations in `View_Kaleido_Panel` (literal — not a constant) | 3000ms |
+| Kaleido slide feel | copied from `Animation_Slide_In` (Options menu); raise `time`, never the distance | fade 300 sine-out / slide 400 cubic-out |
+| Kaleido plot scroll delay | `autoscroll delay` on the plot textbox = hover delay + 5000 | 8000ms |
+| Kaleido plot height | must stay a multiple of 40 (font line grid) | 160 = 4 lines |
+| Kaleido title height | one line of `font_head_bold` (worst-case line height 48.4px) | 50 |
+| Kaleido title overflow | `<scroll>false</scroll>` → ellipsis; omitting the tag makes it scroll | truncate |
 
 10.8px = 1% of screen height. Remember to update `-name` negative twins.

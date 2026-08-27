@@ -69,6 +69,8 @@
     <include file="Includes_Views_List.xml" />
     <include file="Includes_Views_Row.xml" />
     <include file="Includes_Views_Wall.xml" />
+    <!-- SKINMOD: Wall Kaleido (521) info panel. See MOD_CHANGELOG section 23. -->
+    <include file="Includes_Views_Wall_Kaleido.xml" />
     <include file="Includes_Views_Combined.xml" />
     <include file="Includes_Views_PVR.xml" />
 

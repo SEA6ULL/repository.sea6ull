@@ -2903,3 +2903,8 @@ msgstr ""
 msgctxt "#31604"
 msgid "Show section name"
 msgstr ""
+
+#: /1080i/Includes_Views_Wall.xml
+msgctxt "#31605"
+msgid "Wall Kaleido"
+msgstr ""

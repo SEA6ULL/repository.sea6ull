@@ -157,7 +157,21 @@
 
     <expression name="Exp_View_SortModeButtons_HasFocus">[ControlGroup(8000).HasFocus() | [Control.HasFocus(330) + Integer.IsEqual(Window.Property(List.ViewContainer,8000))]]</expression>
 
-    <expression name="Exp_View_WallMode">[Control.IsVisible(500) | Control.IsVisible(510) | Control.IsVisible(520) | Control.IsVisible(530) | Control.IsVisible(540) | Control.IsVisible(560) | Control.IsVisible(570) | Control.IsVisible(580) | Control.IsVisible(590) | Control.IsVisible(561)]</expression>
+    <!-- SKINMOD: gate for View_Furniture_Bottom_DialogPanel. See MOD_CHANGELOG 22.
+         Deliberately narrower than Exp_View_ScrollFilter_HasFocus: the scrollbars (60 and the
+         vertical 64/65/66/611) and the page counter are thin, self-contained furniture that
+         reads fine against artwork, so they do not raise the panel. Only the two strips the
+         user actually selects from do - the sort/view button row (8000 / 330) and the A-Z
+         jump block (19 edit, 600 letter panel, 601 autocomplete).
+
+         610 is deliberately NOT here. In the PVR menu it bounces focus straight to 8000, but
+         the library views' copy (View_Hidden_Buttons) has three conditional onfocus branches
+         and none of them fire when Exp_IsAlphabetStrip is true and Container.NumPages is not
+         1 - so 610 keeps focus as the left/right letter-scrubbing state. View_Alphabet_Filter
+         does not show for 610, so listing it here would raise an empty panel. -->
+    <expression name="Exp_View_FurnitureDialog_IsVisible">[$EXP[Exp_View_SortModeButtons_HasFocus] | Control.HasFocus(19) | Control.HasFocus(600) | Control.HasFocus(601)]</expression>
+
+    <expression name="Exp_View_WallMode">[Control.IsVisible(500) | Control.IsVisible(510) | Control.IsVisible(520) | Control.IsVisible(521) | Control.IsVisible(530) | Control.IsVisible(540) | Control.IsVisible(560) | Control.IsVisible(570) | Control.IsVisible(580) | Control.IsVisible(590) | Control.IsVisible(561)]</expression>
 
     <!-- SKINMOD: Wall view is now always the true row-major grid (7 across, fills
          left-to-right then wraps to the next row), matching Arctic Fuse 3.

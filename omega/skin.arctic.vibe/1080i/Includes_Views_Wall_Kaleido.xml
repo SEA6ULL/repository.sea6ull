@@ -1,0 +1,395 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+    SKINMOD: Wall Kaleido (view 521) - the sliding info panel.
+    See MOD_CHANGELOG section 23 for the full rationale, the traps, and the tuning knobs.
+
+    ARCHITECTURE IN ONE PARAGRAPH
+    The panel lives INSIDE the container's focusedlayout, not as an overlay beside the
+    container. That buys three things for free:
+      1. Position. The layout is drawn at the focused cell's origin, so the panel needs no
+         row/column arithmetic - only a left/right direction choice.
+      2. Hover delay. Kodi calls ResetAnimation(ANIM_TYPE_FOCUS) on the focused layout every
+         time the focused ITEM changes, so a <animation ...>Focus</animation> with a delay
+         restarts its countdown on every d-pad move. No timers, no properties, no script.
+      3. Z-order. Containers render the focused item LAST, so the panel covers its
+         neighbours; and within the layout the panel is declared BEFORE Layout_Poster, so
+         the origin poster covers the panel. That is what makes it die into the poster.
+
+    CONTROL TYPE RESTRICTION - READ BEFORE EDITING
+    Kodi only accepts group / image / label / textbox / progress / multiimage inside a
+    container layout. NO grouplist and NO button. That rules out reusing Info_Panel and
+    Info_RatingsLine wholesale, because Info_RatingsLine is a grouplist of buttons.
+    Includes_Layouts.xml contains zero grouplists for exactly this reason. The ratings row
+    below is therefore three FIXED slots fed by cascading variables rather than an
+    auto-flowing grouplist.
+-->
+<includes>
+
+    <!-- ================================================================= -->
+    <!-- Ratings: presence expressions                                     -->
+    <!-- ================================================================= -->
+    <!--
+        Candidate order is deliberate: the Kodi rating is item-local (ListItem.Rating reads
+        the layout's own item), the other three are Window(Home) properties written by TMDb
+        Helper for whatever is CURRENTLY focused. That is correct here only because the
+        panel is drawn for the focused item and nothing else - do not reuse these variables
+        in an itemlayout.
+    -->
+    <expression name="Exp_Kaleido_Rating_Kodi">!String.IsEmpty(ListItem.Rating)</expression>
+    <expression name="Exp_Kaleido_Rating_TMDb">!String.IsEmpty(Window(Home).Property(TMDbHelper.ListItem.TMDb_Rating))</expression>
+    <expression name="Exp_Kaleido_Rating_IMDb">!String.IsEmpty(Window(Home).Property(TMDbHelper.ListItem.IMDb_Rating))</expression>
+    <expression name="Exp_Kaleido_Rating_RT">!String.IsEmpty(Window(Home).Property(TMDbHelper.ListItem.RottenTomatoes_Rating))</expression>
+
+    <!-- "Exactly N of the first M candidates are present". These are what let the three
+         fixed slots left-pack without a grouplist: slot 2 shows candidate k when exactly
+         one candidate before k is present, slot 3 when exactly two are. -->
+    <expression name="Exp_Kaleido_Rating_One12">[[$EXP[Exp_Kaleido_Rating_Kodi] + !$EXP[Exp_Kaleido_Rating_TMDb]] | [!$EXP[Exp_Kaleido_Rating_Kodi] + $EXP[Exp_Kaleido_Rating_TMDb]]]</expression>
+    <expression name="Exp_Kaleido_Rating_One123">[[$EXP[Exp_Kaleido_Rating_Kodi] + !$EXP[Exp_Kaleido_Rating_TMDb] + !$EXP[Exp_Kaleido_Rating_IMDb]] | [!$EXP[Exp_Kaleido_Rating_Kodi] + $EXP[Exp_Kaleido_Rating_TMDb] + !$EXP[Exp_Kaleido_Rating_IMDb]] | [!$EXP[Exp_Kaleido_Rating_Kodi] + !$EXP[Exp_Kaleido_Rating_TMDb] + $EXP[Exp_Kaleido_Rating_IMDb]]]</expression>
+    <expression name="Exp_Kaleido_Rating_Two123">[[$EXP[Exp_Kaleido_Rating_Kodi] + $EXP[Exp_Kaleido_Rating_TMDb] + !$EXP[Exp_Kaleido_Rating_IMDb]] | [$EXP[Exp_Kaleido_Rating_Kodi] + !$EXP[Exp_Kaleido_Rating_TMDb] + $EXP[Exp_Kaleido_Rating_IMDb]] | [!$EXP[Exp_Kaleido_Rating_Kodi] + $EXP[Exp_Kaleido_Rating_TMDb] + $EXP[Exp_Kaleido_Rating_IMDb]]]</expression>
+
+    <!-- Slot visibility. Slot N is up when at least N candidates are present; written as the
+         OR of that slot's own value conditions so the two can never disagree. -->
+    <expression name="Exp_Kaleido_HasRating1">[$EXP[Exp_Kaleido_Rating_Kodi] | $EXP[Exp_Kaleido_Rating_TMDb] | $EXP[Exp_Kaleido_Rating_IMDb] | $EXP[Exp_Kaleido_Rating_RT]]</expression>
+    <expression name="Exp_Kaleido_HasRating2">[[$EXP[Exp_Kaleido_Rating_Kodi] + $EXP[Exp_Kaleido_Rating_TMDb]] | [$EXP[Exp_Kaleido_Rating_One12] + $EXP[Exp_Kaleido_Rating_IMDb]] | [$EXP[Exp_Kaleido_Rating_One123] + $EXP[Exp_Kaleido_Rating_RT]]]</expression>
+    <expression name="Exp_Kaleido_HasRating3">[[$EXP[Exp_Kaleido_Rating_Kodi] + $EXP[Exp_Kaleido_Rating_TMDb] + $EXP[Exp_Kaleido_Rating_IMDb]] | [$EXP[Exp_Kaleido_Rating_Two123] + $EXP[Exp_Kaleido_Rating_RT]]]</expression>
+
+    <!-- ================================================================= -->
+    <!-- Ratings: slot content                                             -->
+    <!-- ================================================================= -->
+    <!-- Icons follow Info_RatingsLine_Object_Style, so they honour the existing
+         "Colour ratings" setting (Furniture.EnableColourRatings) with no new setting. -->
+
+    <variable name="Var_Kaleido_Rating1_Icon">
+        <value condition="$EXP[Exp_Kaleido_Rating_Kodi]">flags/$VAR[Info_RatingsLine_Object_Style]/ratings/kodi.png</value>
+        <value condition="$EXP[Exp_Kaleido_Rating_TMDb]">flags/$VAR[Info_RatingsLine_Object_Style]/ratings/tmdb.png</value>
+        <value condition="$EXP[Exp_Kaleido_Rating_IMDb]">flags/$VAR[Info_RatingsLine_Object_Style]/ratings/imdb.png</value>
+        <value condition="$EXP[Exp_Kaleido_Rating_RT]">flags/$VAR[Info_RatingsLine_Object_Style]/ratings/$VAR[Image_ListItem_RottenTomatoes]</value>
+    </variable>
+    <variable name="Var_Kaleido_Rating1_Label">
+        <value condition="$EXP[Exp_Kaleido_Rating_Kodi]">$INFO[ListItem.Rating]</value>
+        <value condition="$EXP[Exp_Kaleido_Rating_TMDb]">$INFO[Window(Home).Property(TMDbHelper.ListItem.TMDb_Rating)]</value>
+        <value condition="$EXP[Exp_Kaleido_Rating_IMDb]">$INFO[Window(Home).Property(TMDbHelper.ListItem.IMDb_Rating)]</value>
+        <value condition="$EXP[Exp_Kaleido_Rating_RT]">$INFO[Window(Home).Property(TMDbHelper.ListItem.RottenTomatoes_Rating),,%]</value>
+    </variable>
+
+    <variable name="Var_Kaleido_Rating2_Icon">
+        <value condition="$EXP[Exp_Kaleido_Rating_Kodi] + $EXP[Exp_Kaleido_Rating_TMDb]">flags/$VAR[Info_RatingsLine_Object_Style]/ratings/tmdb.png</value>
+        <value condition="$EXP[Exp_Kaleido_Rating_One12] + $EXP[Exp_Kaleido_Rating_IMDb]">flags/$VAR[Info_RatingsLine_Object_Style]/ratings/imdb.png</value>
+        <value condition="$EXP[Exp_Kaleido_Rating_One123] + $EXP[Exp_Kaleido_Rating_RT]">flags/$VAR[Info_RatingsLine_Object_Style]/ratings/$VAR[Image_ListItem_RottenTomatoes]</value>
+    </variable>
+    <variable name="Var_Kaleido_Rating2_Label">
+        <value condition="$EXP[Exp_Kaleido_Rating_Kodi] + $EXP[Exp_Kaleido_Rating_TMDb]">$INFO[Window(Home).Property(TMDbHelper.ListItem.TMDb_Rating)]</value>
+        <value condition="$EXP[Exp_Kaleido_Rating_One12] + $EXP[Exp_Kaleido_Rating_IMDb]">$INFO[Window(Home).Property(TMDbHelper.ListItem.IMDb_Rating)]</value>
+        <value condition="$EXP[Exp_Kaleido_Rating_One123] + $EXP[Exp_Kaleido_Rating_RT]">$INFO[Window(Home).Property(TMDbHelper.ListItem.RottenTomatoes_Rating),,%]</value>
+    </variable>
+
+    <variable name="Var_Kaleido_Rating3_Icon">
+        <value condition="$EXP[Exp_Kaleido_Rating_Kodi] + $EXP[Exp_Kaleido_Rating_TMDb] + $EXP[Exp_Kaleido_Rating_IMDb]">flags/$VAR[Info_RatingsLine_Object_Style]/ratings/imdb.png</value>
+        <value condition="$EXP[Exp_Kaleido_Rating_Two123] + $EXP[Exp_Kaleido_Rating_RT]">flags/$VAR[Info_RatingsLine_Object_Style]/ratings/$VAR[Image_ListItem_RottenTomatoes]</value>
+    </variable>
+    <variable name="Var_Kaleido_Rating3_Label">
+        <value condition="$EXP[Exp_Kaleido_Rating_Kodi] + $EXP[Exp_Kaleido_Rating_TMDb] + $EXP[Exp_Kaleido_Rating_IMDb]">$INFO[Window(Home).Property(TMDbHelper.ListItem.IMDb_Rating)]</value>
+        <value condition="$EXP[Exp_Kaleido_Rating_Two123] + $EXP[Exp_Kaleido_Rating_RT]">$INFO[Window(Home).Property(TMDbHelper.ListItem.RottenTomatoes_Rating),,%]</value>
+    </variable>
+
+    <!-- ================================================================= -->
+    <!-- Duration                                                          -->
+    <!-- ================================================================= -->
+    <!-- Same source order and the same 31074 "hr" / 31073 "mins" strings that the
+         Duration block of Info_Line uses, so this reads identically to the row views.
+         Resolves to nothing for tvshows / seasons / folders, which is intended - the
+         label simply renders empty rather than showing a placeholder. -->
+    <variable name="Var_Kaleido_Duration">
+        <value condition="!String.IsEmpty(ListItem.Duration) + !Integer.IsEqual(ListItem.Duration(h),0) + !Integer.IsEqual(ListItem.Duration(m),0)">$INFO[ListItem.Duration(h),,$LOCALIZE[31074] ]$INFO[ListItem.Duration(m),, $LOCALIZE[31073]]</value>
+        <value condition="!String.IsEmpty(ListItem.Duration) + !Integer.IsEqual(ListItem.Duration(h),0)">$INFO[ListItem.Duration(h),,$LOCALIZE[31074]]</value>
+        <value condition="!String.IsEmpty(ListItem.Duration) + !Integer.IsEqual(ListItem.Duration(m),0)">$INFO[ListItem.Duration(m),, $LOCALIZE[31073]]</value>
+        <value condition="!String.IsEmpty(Window(Home).Property(TMDbHelper.ListItem.Duration_H)) + !Integer.IsEqual(Window(Home).Property(TMDbHelper.ListItem.Duration_H),0) + !Integer.IsEqual(Window(Home).Property(TMDbHelper.ListItem.Duration_M),0)">$INFO[Window(Home).Property(TMDbHelper.ListItem.Duration_H),,$LOCALIZE[31074] ]$INFO[Window(Home).Property(TMDbHelper.ListItem.Duration_M),, $LOCALIZE[31073]]</value>
+        <value condition="!String.IsEmpty(Window(Home).Property(TMDbHelper.ListItem.Duration_H)) + !Integer.IsEqual(Window(Home).Property(TMDbHelper.ListItem.Duration_H),0)">$INFO[Window(Home).Property(TMDbHelper.ListItem.Duration_H),,$LOCALIZE[31074]]</value>
+        <value condition="!String.IsEmpty(Window(Home).Property(TMDbHelper.ListItem.Duration_M)) + !Integer.IsEqual(Window(Home).Property(TMDbHelper.ListItem.Duration_M),0)">$INFO[Window(Home).Property(TMDbHelper.ListItem.Duration_M),, $LOCALIZE[31073]]</value>
+    </variable>
+
+    <!-- ================================================================= -->
+    <!-- One ratings slot                                                  -->
+    <!-- ================================================================= -->
+    <!-- Fixed 150px pitch. Icon box is 44x32 with aspectratio keep, which is wide enough
+         for the IMDb wordmark (Info_RatingsLine_Object gives it icon_w 52 because it can
+         auto-flow; here it scales down inside the fixed box instead). -->
+    <include name="Kaleido_Rating_Slot">
+        <definition>
+            <control type="group">
+                <left>$PARAM[left]</left>
+                <width>140</width>
+                <height>40</height>
+                <visible>$PARAM[visible]</visible>
+                <control type="image">
+                    <width>44</width>
+                    <height>32</height>
+                    <centertop>50%</centertop>
+                    <aspectratio align="left">keep</aspectratio>
+                    <texture colordiffuse="dialog_fg_90">$PARAM[icon]</texture>
+                </control>
+                <control type="label">
+                    <left>52</left>
+                    <width>88</width>
+                    <height>40</height>
+                    <aligny>center</aligny>
+                    <font>font_main</font>
+                    <textcolor>dialog_fg_70</textcolor>
+                    <label>$PARAM[label]</label>
+                </control>
+            </control>
+        </definition>
+    </include>
+
+    <!-- ================================================================= -->
+    <!-- The panel                                                         -->
+    <!-- ================================================================= -->
+    <!--
+        Params:
+          id          container id, used only for the Control.HasFocus safety gate
+          left        kaleido_right_x or kaleido_left_x
+          slide_start slide effect start offset - always points back toward the poster
+          pad_left    kaleido_pad_tucked for the right variant, kaleido_pad for the left
+          pad_right   the mirror of pad_left
+          visible     the Container.Column() direction test
+
+        ONE animation, TWO effects. This is not a style choice - it is the only form that
+        works. Kodi queues Focus animations through CGUIControl::QueueAnimation, which calls
+        GetAnimation(ANIM_TYPE_FOCUS) and that returns only the FIRST animation of the type.
+        Two stacked <animation ...>Focus</animation> tags therefore run the first and silently
+        ignore the second. The original version stacked a fade and a slide, so only the fade
+        ever ran and the panel simply dissolved into place - no amount of retuning the slide's
+        time, distance or easing changed anything, because the slide was never queued.
+
+        Note this trap is specific to Focus/Unfocus/Visible/Hidden, which are QUEUED. Multiple
+        Conditional animations on one control are fine - those are evaluated independently -
+        which is why stacked animations look safe elsewhere in this skin.
+
+        The multi-effect form below is the skin's own idiom for combining a fade with a slide;
+        see Custom_1143_OSD_NextOverlay.xml, which does exactly this for WindowOpen/Visible.
+
+        delay/time/start are literals: Kodi resolves <constant> substitutions on element
+        VALUES, not on attributes, so a constant name in delay="" or start="" reads as 0.
+        slide_start is passed as a literal number by View_Kaleido_Info for the same reason.
+        Both effects must keep the SAME delay or the panel fades in before it starts moving.
+
+        TIMING - COPIED FROM THE OPTIONS MENU
+        These values are lifted verbatim from Animation_Slide_In (Includes_Animations.xml),
+        which is what Custom_1170_Dialog_HomeMenu.xml uses via Animation_Right_Delay:
+
+            fade  time 300  tween sine   easing out
+            slide time 400  tween cubic  easing out
+
+        Two things make that read as smoother than the hand-rolled version it replaces
+        (fade 150 untweened, slide 600 sine-out):
+          - The fade is EASED and long. An untweened 150ms fade snaps to opaque almost at
+            once, so the travel that follows reads as a jump rather than a glide.
+          - The fade and the slide are close in length (300 vs 400), so the panel is visibly
+            moving while it is still coming up in opacity. The motion and the appearance are
+            one gesture instead of two.
+          - cubic-out decelerates harder than sine-out, so it settles rather than drifts.
+
+        Only the delay differs from the Options menu, which uses 400; ours is the 3000ms
+        hover wait. Keep the two delays equal to each other or the panel fades in before it
+        starts moving.
+
+        delay/time/start are literals: Kodi resolves <constant> substitutions on element
+        VALUES, not on attributes, so a constant name in delay="" or start="" reads as 0.
+        slide_start is passed as a literal number by View_Kaleido_Info for the same reason.
+
+        The Options menu travels 320px; ours travels 217.14 because the distance is
+        geometrically pinned (see View_Kaleido_Info). Same timing over a shorter distance is
+        simply gentler, which is the direction we want anyway.
+    -->
+    <include name="View_Kaleido_Panel">
+        <definition>
+            <control type="group">
+                <left>$PARAM[left]</left>
+                <top>0</top>
+                <width>kaleido_ext_w</width>
+                <height>kaleido_panel_h</height>
+
+                <visible>$PARAM[visible]</visible>
+                <visible>Control.HasFocus($PARAM[id])</visible>
+
+                <animation type="Focus" reversible="false">
+                    <effect type="fade" start="0" end="100" delay="3000" time="300" tween="sine" easing="out" />
+                    <effect type="slide" start="$PARAM[slide_start],0" end="0,0" delay="3000" time="400" tween="cubic" easing="out" />
+                </animation>
+
+                <!-- Background. Dialog_Background_Blur is the same include every real dialog
+                     resolves through, so the panel follows Skin.String(Background.DialogImage)
+                     with no setting of its own, including the Adaptive theme's blurred-artwork
+                     fill. It is built purely from image controls, which is why it is legal
+                     inside a container layout where Info_Panel is not.
+
+                     transparency is deliberately NOT passed - see MOD_CHANGELOG 22f. -->
+                <include content="Dialog_Background_Blur">
+                    <param name="shadow">true</param>
+                    <param name="diffuse">diffuse/dialog_w1120_h400.png</param>
+                </include>
+
+                <!-- Content -->
+                <control type="group">
+                    <left>$PARAM[pad_left]</left>
+                    <right>$PARAM[pad_right]</right>
+
+                    <!-- Title. One label, truncated with an ellipsis when it overruns.
+
+                         A list label with <scroll>false</scroll> is constructed NEVER, which
+                         CGUIListLabel maps to CGUILabel::OVER_FLOW_TRUNCATE - documented in
+                         GUILabel.h as "Truncated text from right (text end with ellipses)".
+                         So the three dots come for free; there is no separate tag for them.
+
+                         Do not remove the <scroll>false</scroll>. Omitting <scroll> entirely
+                         is NOT the same thing: GUIControlFactory defaults a list label to
+                         CGUIControl::FOCUS, which scrolls whenever the item is focused - and
+                         inside a focusedlayout that means always. The explicit false is what
+                         holds the text still.
+
+                         This deliberately replaced a two-label marquee (static below 7s, a
+                         System.IdleTime-triggered scrolling copy above it). It worked, but
+                         moving text alongside the plot's autoscroll made the panel busy.
+                         Truncation is quieter. MOD_CHANGELOG 23m records how the marquee was
+                         built if it is ever wanted back. -->
+                    <control type="label">
+                        <top>28</top>
+                        <height>50</height>
+                        <aligny>center</aligny>
+                        <font>font_head_bold</font>
+                        <textcolor>dialog_fg_100</textcolor>
+                        <label>$VAR[Label_Title]</label>
+                        <scroll>false</scroll>
+                    </control>
+
+                    <!-- Plot, starting immediately under the title row.
+
+                         Line height is exactly 40 - Includes_Font.xml quantises plotbox
+                         linespacing to a 40px grid on purpose - so height MUST stay a
+                         multiple of 40 or the last line is half-drawn. 160 = four lines.
+                         Bottom edge lands at 238, six clear pixels above the ratings row.
+
+                         autoscroll delay is 8000, not 5000: the skin default (6000, in
+                         Includes_Defaults.xml) counts from the moment the item is focused,
+                         and the textbox starts accumulating immediately even though the panel
+                         is still held at alpha 0 by the Focus animation. 3000 panel delay +
+                         5000 gives five full seconds of readable, static plot AFTER the panel
+                         has finished sliding out. If you change the 3000 hover delay, change
+                         this to match. For five seconds from focus instead, use 5000.
+
+                         time and repeat are the skin defaults, and the condition is the stock
+                         one, so the global "Disable textbox autoscroll" setting still works. -->
+                    <control type="textbox">
+                        <top>78</top>
+                        <height>160</height>
+                        <aligny>top</aligny>
+                        <font>font_main_plot</font>
+                        <textcolor>dialog_fg_70</textcolor>
+                        <label>$VAR[Label_Plot]</label>
+                        <autoscroll delay="8000" time="3000" repeat="10000">!Skin.HasSetting(Textboxes.DisableAutoscroll)</autoscroll>
+                    </control>
+
+                    <!-- Ratings, pinned bottom left -->
+                    <control type="group">
+                        <bottom>26</bottom>
+                        <height>40</height>
+                        <include content="Kaleido_Rating_Slot">
+                            <param name="left">0</param>
+                            <param name="icon">$VAR[Var_Kaleido_Rating1_Icon]</param>
+                            <param name="label">$VAR[Var_Kaleido_Rating1_Label]</param>
+                            <param name="visible">$EXP[Exp_Kaleido_HasRating1]</param>
+                        </include>
+                        <include content="Kaleido_Rating_Slot">
+                            <param name="left">150</param>
+                            <param name="icon">$VAR[Var_Kaleido_Rating2_Icon]</param>
+                            <param name="label">$VAR[Var_Kaleido_Rating2_Label]</param>
+                            <param name="visible">$EXP[Exp_Kaleido_HasRating2]</param>
+                        </include>
+                        <include content="Kaleido_Rating_Slot">
+                            <param name="left">300</param>
+                            <param name="icon">$VAR[Var_Kaleido_Rating3_Icon]</param>
+                            <param name="label">$VAR[Var_Kaleido_Rating3_Label]</param>
+                            <param name="visible">$EXP[Exp_Kaleido_HasRating3]</param>
+                        </include>
+                    </control>
+
+                    <!-- Duration, pinned bottom right. Right-anchored with a fixed 240 width;
+                         the ratings row ends at 440 so the two cannot collide inside the
+                         691px content box. -->
+                    <control type="label">
+                        <right>0</right>
+                        <width>240</width>
+                        <bottom>26</bottom>
+                        <height>40</height>
+                        <align>right</align>
+                        <aligny>center</aligny>
+                        <font>font_main</font>
+                        <textcolor>dialog_fg_70</textcolor>
+                        <label>$VAR[Var_Kaleido_Duration]</label>
+                    </control>
+                </control>
+            </control>
+        </definition>
+    </include>
+
+    <!-- ================================================================= -->
+    <!-- Direction chooser                                                 -->
+    <!-- ================================================================= -->
+    <!--
+        Columns 0-3 (the first four) slide right, columns 4-6 (the last three) slide left.
+        Both variants are always instantiated; the Container().Column() test decides which
+        one is visible. Because they are mutually exclusive only one ever animates.
+
+        Container(id).Column(n) is a stock boolean condition documented for use inside item
+        layouts. It is used NOWHERE ELSE in this skin, so it is the single thing worth
+        verifying on hardware first. Two fallbacks if it misbehaves, in order of preference:
+          1. Drop the id and use the bare Container.Column(n).
+          2. Enumerate Container(id).Position(n) instead - with 7 across and 3 rows visible
+             the cursor runs 0-20, so column 0 is Position(0)|Position(7)|Position(14), and
+             so on. Verbose but uses only Container.Position.
+
+        SLIDE DISTANCE
+        slide_start is +/- 217.14, which is view_poster_item_w - one poster width exactly.
+        That is not arbitrary. The panel is 811px wide and the poster only 217px, so the
+        panel can never be fully hidden behind its own poster; the fade is what conceals the
+        start of the travel. What the distance controls is how far the panel's TRAILING edge
+        overhangs its neighbour at t=0:
+
+          right variant, start: group left = 177.14 - 217.14 = -40.00
+          left  variant, start: group right = -771.42 + 217.14 + 811.42 = 257.14
+
+        -40 is precisely the gutter between two posters, and 257.14 is precisely the next
+        poster's left edge. So at maximum extension backward the panel exactly fills the
+        poster plus its gutter and stops dead on the neighbour's edge - it never covers an
+        adjacent poster, in either direction, at any point in the animation.
+
+        Going further would look like a longer slide but would sweep across the neighbour.
+        Raise the slide time in View_Kaleido_Panel instead.
+
+        These must be literal numbers, not constant names: they land in an animation
+        attribute, and Kodi does not resolve constants in attributes.
+    -->
+    <include name="View_Kaleido_Info">
+        <definition>
+            <!-- Slide right: columns 0,1,2,3 -->
+            <include content="View_Kaleido_Panel">
+                <param name="id">$PARAM[id]</param>
+                <param name="left">kaleido_right_x</param>
+                <param name="slide_start">-217.14</param>
+                <param name="pad_left">kaleido_pad_tucked</param>
+                <param name="pad_right">kaleido_pad</param>
+                <param name="visible">[Container($PARAM[id]).Column(0) | Container($PARAM[id]).Column(1) | Container($PARAM[id]).Column(2) | Container($PARAM[id]).Column(3)]</param>
+            </include>
+            <!-- Slide left: columns 4,5,6 -->
+            <include content="View_Kaleido_Panel">
+                <param name="id">$PARAM[id]</param>
+                <param name="left">kaleido_left_x</param>
+                <param name="slide_start">217.14</param>
+                <param name="pad_left">kaleido_pad</param>
+                <param name="pad_right">kaleido_pad_tucked</param>
+                <param name="visible">[Container($PARAM[id]).Column(4) | Container($PARAM[id]).Column(5) | Container($PARAM[id]).Column(6)]</param>
+            </include>
+        </definition>
+    </include>
+
+</includes>

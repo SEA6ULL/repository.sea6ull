@@ -2122,6 +2122,56 @@
         </definition>
     </include>
 
+    <!-- SKINMOD: Wall Kaleido (view 521). Layout_Poster with the sliding info panel added
+         underneath it. See MOD_CHANGELOG section 23.
+
+         ORDER IS LOAD-BEARING. View_Kaleido_Info is declared BEFORE the Layout_Poster
+         include so the poster draws on top of the panel. That, plus kaleido_tuck running
+         the panel 40px under the poster, is the entire "dies into the poster" effect.
+         Swapping these two includes puts the panel over its own poster and breaks it.
+
+         The panel is gated on focusedlayout + selected. List_Core emits the itemlayout
+         include three times: once for the plain itemlayout (focusedlayout unset, so the
+         declared default false applies), and twice inside the focusedlayout - selected
+         false for the copy that fades out when the container has focus, selected true for
+         the copy that fades in. Only the latter should carry a panel.
+
+         Every other param is relayed to Layout_Poster by name and NOT given a default here,
+         so unresolved ones are dropped by Kodi and Layout_Poster's own defaults apply. That
+         is the same mechanism that already makes `icon` work through List_Poster_Row today;
+         declaring empty defaults here instead would break it - see MOD_CHANGELOG 21e. -->
+    <include name="Layout_Kaleido">
+        <param name="focusedlayout">false</param>
+        <param name="selected">false</param>
+        <definition>
+            <control type="group">
+                <width>$PARAM[item_w]</width>
+                <height>$PARAM[item_h]</height>
+
+                <include content="View_Kaleido_Info" condition="$PARAM[focusedlayout] + $PARAM[selected]">
+                    <param name="id">$PARAM[id]</param>
+                </include>
+
+                <include content="Layout_Poster">
+                    <param name="selected">$PARAM[selected]</param>
+                    <param name="item_w">$PARAM[item_w]</param>
+                    <param name="item_h">$PARAM[item_h]</param>
+                    <param name="misc">$PARAM[misc]</param>
+                    <param name="id">$PARAM[id]</param>
+                    <param name="detailed">$PARAM[detailed]</param>
+                    <param name="indicator">$PARAM[indicator]</param>
+                    <param name="variation">$PARAM[variation]</param>
+                    <param name="diffuse">$PARAM[diffuse]</param>
+                    <param name="icon">$PARAM[icon]</param>
+                    <param name="textcolor">$PARAM[textcolor]</param>
+                    <param name="shadow_colordiffuse">$PARAM[shadow_colordiffuse]</param>
+                    <param name="include_detailed_labels">$PARAM[include_detailed_labels]</param>
+                    <param name="use_label2">$PARAM[use_label2]</param>
+                </include>
+            </control>
+        </definition>
+    </include>
+
     <include name="Layout_Poster">
         <param name="detailed">false</param>
         <param name="selected">false</param>

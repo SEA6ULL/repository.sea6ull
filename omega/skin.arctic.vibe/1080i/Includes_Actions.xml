@@ -89,6 +89,7 @@
         <value condition="Control.IsVisible(500)">500</value>
         <value condition="Control.IsVisible(510)">510</value>
         <value condition="Control.IsVisible(520)">520</value>
+        <value condition="Control.IsVisible(521)">521</value>  <!-- SKINMOD: Wall Kaleido -->
         <value condition="Control.IsVisible(530)">530</value>
         <value condition="Control.IsVisible(540)">540</value>
         <value condition="Control.IsVisible(560)">560</value>
@@ -113,6 +114,7 @@
         <value condition="Control.IsVisible(500)">500</value>
         <value condition="Control.IsVisible(510)">510</value>
         <value condition="Control.IsVisible(520)">520</value>
+        <value condition="Control.IsVisible(521)">521</value>  <!-- SKINMOD: Wall Kaleido -->
         <value condition="Control.IsVisible(530)">530</value>
         <value condition="Control.IsVisible(540)">540</value>
         <value condition="Control.IsVisible(560)">560</value>
