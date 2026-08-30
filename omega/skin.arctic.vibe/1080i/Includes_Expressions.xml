@@ -192,6 +192,27 @@
 
     <expression name="Exp_BackgroundArtwork_IsHidden">[[![$EXP[Exp_InfoDialogs] | Window.IsVisible(1190)] + [Window.IsVisible(favouritesbrowser) | Window.IsVisible(weather) | !String.IsEmpty(Window.Property(Background.HideArtwork))]] | [[$EXP[Exp_InfoDialogs] | Window.IsVisible(1190)] + [!String.IsEmpty(Window(Home).Property(Background.DialogInfo.HideArtwork)) | ![Skin.String(Info.Layout,Flip) | Skin.String(Info.Layout,Flix)]]]]</expression>
 
+    <!-- SKINMOD: "Disable fanart for wall viewtypes" (Behaviour > Background). See MOD_CHANGELOG
+         section 24. Deliberately a SEPARATE expression rather than an extra term inside
+         Exp_BackgroundArtwork_IsHidden, for two reasons:
+
+         1. Exp_BackgroundArtwork_IsHidden only drives the sharp FlixArt/Fanart panel. It does
+            NOT gate Background_Blur_Quadrants, so folding the wall condition into it would
+            leave the blurred fanart surround drawn. The two mask layers on top of it
+            (combined_flixart.png + combined_overlay.png) only reach ~60% composite opacity
+            across the top of the screen, so the blur would still read through behind the
+            wall grid's top row.
+         2. Exp_BackgroundArtwork_IsHidden feeds Exp_BackgroundArtwork_IsOverlay, which is
+            consumed well outside the background stack. Adding a term there would switch the
+            overlay wash on for wall views as a side effect.
+
+         Exp_View_WallMode is the same expression the wall header and vertical scrollbar use,
+         so a new viewtype only has to be registered there once. Its Control.IsVisible() ids
+         (500/510/520/521/530/540/560/561/570/580/590) do not exist on Home, the hubs or in
+         any shortcut template, so this expression is inert in every non-view window that
+         pulls in the Background includes. -->
+    <expression name="Exp_BackgroundArtwork_WallIsDisabled">[Skin.HasSetting(Background.DisableWallFanart) + $EXP[Exp_View_WallMode]]</expression>
+
     <expression name="Exp_BackgroundArtwork_IsOverlay">[$EXP[Exp_BackgroundArtwork_IsHidden] | [!$EXP[Exp_InfoDialogs] + !String.IsEmpty(Window(Home).Property(Background.ShowOverlay))] | [$EXP[Exp_InfoDialogs] + ![Skin.String(Info.Layout,Flix) + !String.IsEqual(ListItem.Property(tmdb_type),person)]]]</expression>
 
     <expression name="Exp_BackgroundArtwork_IsSimple">[$EXP[Exp_PlainBackgroundWindows] | [Window.IsMedia + [[Window.IsVisible(DialogBusy.xml) + Integer.IsEqual(Container.NumItems,0)] | [Container.Content() + !$EXP[Exp_PVRWindows]]]]]</expression>

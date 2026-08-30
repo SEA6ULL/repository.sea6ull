@@ -557,6 +557,33 @@
             <onclick>Skin.ToggleSetting(Background.ExtraFanart)</onclick>
             <selected>Skin.HasSetting(Background.ExtraFanart)</selected>
         </include>
+        <!-- SKINMOD: "Disable fanart for wall viewtypes". Off by default (unset = stock
+             behaviour, fanart behind the wall grid). When on, Background_FlixArt,
+             Background_Fanart and Background_Blur_Quadrants are hidden via <visible> for the
+             eleven wall viewtypes and Background_Wall_NoFanart supplies a plain base instead.
+             See MOD_CHANGELOG section 24.
+
+             id 025: 001-018 and 020-024 are taken in this include. 019 is the gap left by the
+             removed Spotlight trailer setting and is deliberately still skipped (see the note
+             on id 024) so it is not read as belonging to the Trailers group.
+
+             slevel 2 matches the "Background" section label above it. A lower value would leave
+             this entry visible at settings level 0/1 with its own header hidden, orphaning it
+             under the Playback group.
+
+             Polarity follows section 20: positive <selected> on a Disable-named setting, so the
+             setting name, the label and the radio state all move together. -->
+        <include content="Settings_Button" description="Disable fanart for wall viewtypes">
+            <param name="dialog">false</param>
+            <param name="window">skinsettings</param>
+            <param name="baseid">$PARAM[baseid]</param>
+            <param name="id">025</param>
+            <param name="control">radiobutton</param>
+            <param name="slevel">2</param>
+            <label>$LOCALIZE[31606]</label>
+            <onclick>Skin.ToggleSetting(Background.DisableWallFanart)</onclick>
+            <selected>Skin.HasSetting(Background.DisableWallFanart)</selected>
+        </include>
 
         <include content="Settings_Label" description="Trailers">
             <param name="window">skinsettings</param>

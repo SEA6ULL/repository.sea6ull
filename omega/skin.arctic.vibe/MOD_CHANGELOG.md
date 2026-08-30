@@ -1,6 +1,6 @@
 # Arctic Vibe — Mod Changelog
 
-Ships as **Arctic Vibe** (`skin.arctic.vibe`, v1.0.4) by sea6ull.
+Ships as **Arctic Vibe** (`skin.arctic.vibe`, v1.0.6) by sea6ull.
 A modified fork of **Arctic Fuse 2** (`skin.arctic.fuse.2`, v2.12.12) by jurialmunkey.
 
 This document records every change made to the upstream skin, and — where it matters —
@@ -1753,78 +1753,22 @@ on hardware before trusting the rest. Two fallbacks, in order of preference:
    `Position(1) | Position(8) | Position(15)`, and so on. Verbose, but depends only on
    `Container.Position`.
 
-### 23e. The animation — one animation, two effects
+### 23e. The animations
 
 ```xml
-<animation type="Focus" reversible="false">
-    <effect type="fade"  start="0" end="100" delay="3000" time="150" />
-    <effect type="slide" start="±217.14,0" end="0,0" delay="3000" time="600" tween="sine" easing="out" />
-</animation>
+<animation effect="fade"  start="0"   end="100" delay="3000" time="200">Focus</animation>
+<animation effect="slide" start="±160,0" end="0,0" delay="3000" time="320" tween="quadratic" easing="out">Focus</animation>
 ```
 
-#### The trap: stacked Focus animations silently drop all but the first
-The first two attempts wrote this as **two** sibling tags:
+`start` always points back toward the poster, so the panel emerges from behind it. The fade
+finishes before the slide does, which is why the panel is invisible during the part of the
+travel where it would otherwise be seen poking out from under the poster.
 
-```xml
-<animation effect="fade"  ...>Focus</animation>
-<animation effect="slide" ...>Focus</animation>
-```
-
-That does not work. Kodi queues Focus animations through `CGUIControl::QueueAnimation`, which
-calls `GetAnimation(ANIM_TYPE_FOCUS)` — and that returns only the **first** animation of the
-type. The slide was never queued, so the panel simply dissolved into place. Retuning the
-slide's `time`, distance and easing changed nothing observable, because the slide was not
-running at all. The reported symptom — "it's just appearing, like a fast dissolve" — was
-literally accurate, and the first diagnosis (easing front-loading the motion) was wrong.
-
-**This trap is specific to the QUEUED animation types** — Focus, Unfocus, Visible, Hidden.
-Multiple `Conditional` animations on one control are evaluated independently and work fine,
-which is why stacked `<animation>` tags look safe elsewhere in this skin. A sweep confirms no
-other control in the skin stacks two same-type Focus animations; every fade+slide combination
-uses the multi-effect form, e.g. `Custom_1143_OSD_NextOverlay.xml`.
-
-#### Timing is copied verbatim from the Options menu
-The values come straight from `Animation_Slide_In` in `Includes_Animations.xml`, which is what
-`Custom_1170_Dialog_HomeMenu.xml` uses via `Animation_Right_Delay`:
-
-| Effect | time | tween | easing |
-|---|---|---|---|
-| fade | 300 | sine | out |
-| slide | 400 | cubic | out |
-
-Three things make that smoother than the hand-rolled version it replaced (fade 150 untweened,
-slide 600 sine-out):
-
-* **The fade is eased and long.** An untweened 150ms fade snaps to opaque almost immediately,
-  so the travel that follows reads as a jump rather than a glide.
-* **Fade and slide are close in length** (300 vs 400), so the panel is visibly moving while it
-  is still coming up in opacity. Motion and appearance become one gesture instead of two.
-* **cubic-out decelerates harder than sine-out**, so the panel settles rather than drifts.
-
-This corrects an assumption in the earlier version of this section, which reasoned that the
-fade should be *short* to maximise "visible travel at full opacity". The Options menu shows the
-opposite reads better: you want to see the panel moving *through* the fade, not after it.
-
-Only the delay differs — the Options menu uses 400, ours is the 3000ms hover wait. Keep both
-effects' delays equal or the panel fades in before it starts moving.
-
-#### The distance is geometrically pinned
-`slide_start` is ±217.14 = `view_poster_item_w`, one poster width exactly. The panel is 811px
-wide against a 217px poster, so it can never hide fully behind its own poster — the fade
-conceals the start. What the distance actually controls is how far the panel's trailing edge
-overhangs its neighbour at t=0:
-
-| Variant | Trailing edge at slide start | Neighbour edge |
-|---|---|---|
-| right (cols 0–3) | 177.14 − 217.14 = **−40.00** | gutter is exactly 40 wide |
-| left (cols 4–6) | −771.42 + 217.14 + 811.42 = **257.14** | next poster starts at 257.14 |
-
-At maximum backward extension the panel exactly fills its own poster plus the gutter and stops
-dead on the neighbour's edge. It never covers an adjacent poster, in either direction, at any
-point in the animation.
-
-The Options menu travels 320px by comparison. Same timing over a shorter distance is simply
-gentler, which is the direction we want anyway.
+**`delay` and `time` are written as literals on purpose.** Kodi resolves `<constant>`
+substitutions on element *values*, not on attributes — a constant name in `delay=""` would be
+read as 0. Both animations must carry the **same** delay or the panel fades in before it moves.
+To change the hover delay, change both numbers in `View_Kaleido_Panel`; it is the only place
+they appear.
 
 ### 23f. CONTROL TYPE RESTRICTION — read before editing the panel
 
@@ -1841,9 +1785,10 @@ Consequences:
 * Title and Plot are plain textboxes fed by `$VAR[Label_Title]` / `$VAR[Label_Plot]` — the same
   variables the row views use, and both read a bare `ListItem.`, which is exactly right inside
   an item layout.
-* **Nothing can reflow.** Without a grouplist the plot's `top` is fixed, so the title must not
-  be allowed to change any other control's position. See 23m for how the title was made a
-  single line to close the gap this originally caused.
+* **Title and Plot are fixed-height boxes, not auto-height.** Without a grouplist nothing can
+  reflow below them, so the title must not be allowed to change anything else's position.
+  Title is 90px (two lines of `font_head_bold`), plot 112px (`font_main_plot` is quantised to
+  the skin's 40px line grid, so 112 clips the third line cleanly rather than half-drawing it).
 * The ratings row cannot auto-flow, so it is **three fixed slots at a 150px pitch**, fed by
   cascading variables that left-pack the available ratings — see below.
 
@@ -1983,95 +1928,11 @@ next to Wall Poster in the picker.
 `5X1` for "Wall View Control" — a convention `561` (Small Banner Wall) already breaks, and no
 `5X1` control exists for any wall view.
 
-### 23m. Title and plot spacing, and the plot scroll delay
+#### Placeholder artwork
+`extras/viewtypes/wall-kaleido.jpg` is currently a **copy of `wall-poster.jpg`**. It is
+functional but does not show the panel. Replace it with a real screenshot when convenient.
 
-**The gap.** The title started as a two-line, top-aligned textbox 90px tall. A one-line title —
-the common case — therefore left a whole empty line between the title and the plot.
-
-Three fixes were considered and two rejected:
-
-* **Auto-height title** (`<height max="90">auto</height>`, which this Kodi build does support —
-  `Info_Title_Text` already uses it). Rejected: it shrinks the *title's own box*, but the plot's
-  `top` is fixed, so the gap stays exactly where it was.
-* **Bottom-anchor the text inside a two-line box.** Rejected: Kodi has no `aligny bottom`.
-  `CGUIControlFactory::GetAlignmentY` only understands `center`; anything else falls through to
-  top.
-* **Single-line title.** Adopted. It closes the gap in every case rather than the common one,
-  and hands the 45px it saves to the plot, which now gets **four lines instead of three**.
-
-#### The title truncates with an ellipsis — no scrolling
-One label, `<scroll>false</scroll>`. `GUIControlFactory` constructs that as
-`CGUIControl::NEVER`, which `CGUIListLabel` maps to `CGUILabel::OVER_FLOW_TRUNCATE` —
-documented in `GUILabel.h` as *"Truncated text from right (text end with ellipses)"*. The three
-dots come for free; there is no separate tag for them.
-
-**Do not drop the `<scroll>false</scroll>`.** Omitting `<scroll>` entirely is not equivalent:
-`GUIControlFactory` defaults a list label to `CGUIControl::FOCUS`, which scrolls whenever the
-item is focused — and inside a focusedlayout that means always. The explicit `false` is what
-holds the text still.
-
-#### What this replaced, and why it is worth recording
-Two earlier revisions are now gone. Both worked; both were rejected on looks.
-
-1. **Single-line textbox with `autoscroll delay`.** Takes a real delay, but a textbox scrolls
-   *vertically*, so long titles slid up to a second line.
-2. **Two overlapping labels — static below 7s, marquee above.** This was the only way to get a
-   horizontal marquee *with* a delay, and the reasoning behind it is worth keeping in case the
-   effect is ever wanted elsewhere in this skin:
-
-   * A label marquees sideways but has **no scroll delay**. Verified against Kodi source:
-     `GUIControlFactory` parses only `<scroll>`, `<scrollspeed>` and `<scrollsuffix>` for
-     labels, and the initial wait lives in `CScrollInfo` as a constructor default of 50 frames
-     (~0.8s) that is never read from XML. `<pauseatend>` is a `fadelabel` tag, and fadelabel is
-     unsupported inside a list container.
-   * So the delay has to come from visibility. `CGUIControl::DoProcess` calls `Process()` only
-     when `IsVisible()`, so a label hidden by a `<visible>` condition does not advance its
-     scroll and starts from the beginning when it appears. **This works only with `<visible>`** —
-     culling is separate (`m_transform.alpha <= 0.01f` does not stop `Process()`), so
-     cross-fading the two labels would have revealed a marquee already mid-text.
-   * The trigger was `System.IdleTime(7)`: there is no per-item timer inside a container layout,
-     but any input resets the idle clock and input is what moves focus between posters, so
-     "7 seconds idle" and "7 seconds hovering this poster" coincide on a remote.
-
-   Rejected because moving title text alongside the plot's autoscroll made the panel busy.
-   Truncation is quieter.
-
-Only the plot scrolls now: panel opens at **3s**, plot autoscrolls at **8s**, title never moves.
-
-#### Height 50
-One line of `font_head_bold`, which resolves to Inter-Bold or RobotoCondensed-Bold at size 38 or
-40 depending on the font preset — line heights 44.5 / 46.0 / 46.9 / 48.4px, all of which clear
-50. (The hazard that made this worth measuring belonged to the textbox version: a textbox
-computes `itemsPerPage` as `height / lineHeight` and renders *nothing* if the box is too small.
-A label has no such cliff, but the measurement still sets the row height.)
-
-Resulting vertical stack inside the 310px panel:
-
-| Band | y | Height |
-|---|---|---|
-| top pad | 0–28 | 28 |
-| title label | 28–78 | 50 |
-| plot, 4 × 40 | 78–238 | 160 |
-| gap | 238–244 | 6 |
-| ratings / duration | 244–284 | 40 |
-| bottom pad | 284–310 | 26 |
-
-**Plot height must stay a multiple of 40.** `Includes_Font.xml` quantises plotbox linespacing to
-a 40px grid deliberately, so any other value half-draws the last line.
-
-**Plot scroll delay is 8000, not 5000.** The skin default (`Includes_Defaults.xml`: delay 6000,
-time 3000, repeat 10000) counts from the moment the item is *focused* — the textbox starts
-accumulating immediately, because the panel group is `visible` from t=0 and only held at alpha 0
-by the Focus animation. So 3000 (panel delay) + 5000 gives five full seconds of readable, static
-plot **after** the panel has finished sliding out, which is what "5 second delay" means from the
-viewer's side. **If the 3000 hover delay changes, change this to match.** For five seconds from
-focus instead, use 5000.
-
-`time` and `repeat` are left at the skin defaults and the condition is the stock
-`!Skin.HasSetting(Textboxes.DisableAutoscroll)`, so the global "disable textbox autoscroll"
-setting still governs this panel.
-
-### 23n. Left deliberately in place
+### 23m. Left deliberately in place
 
 * **Wall Poster (520)** — unchanged, still offered, still the default poster wall.
 * `List_Poster_Row` and `Layout_Poster` — untouched. `List_Kaleido_Row` is a sibling that
@@ -2081,10 +1942,179 @@ setting still governs this panel.
   controls to the focusedlayout only, which Kodi clones on demand for the focused item, so the
   preload cost is unchanged.
 
-### 23o. Version bumped to 1.0.5
+### 23n. Version bumped to 1.0.5
 
 `addon.xml`. The Settings version line reads `System.AddonVersion(skin.arctic.vibe)`
 (section 11), so it follows automatically.
+
+---
+
+## 24. New setting: disable fanart for wall viewtypes
+
+**Settings → Skin Settings → Behaviour → Background → "Disable fanart for wall viewtypes"**
+(`Skin.HasSetting(Background.DisableWallFanart)`, string `#31606`, id `5025`).
+
+Off by default — unset is the stock behaviour, fanart behind the wall grid. When on, the eleven
+wall viewtypes render against the plain window background instead. Every other window, and every
+non-wall viewtype, is untouched.
+
+The motivation is section 21: the wall grid is now full-bleed, three rows of artwork from y40 to
+y1050. Fanart behind it competes with the posters rather than framing them.
+
+### 24a. Why this is a visibility gate and not a cover layer
+
+The first design painted an opaque layer over the background. It was rejected: the textures would
+still be fetched, decoded and held in VRAM on every focus change, with the cost paid on exactly
+the low-power devices where a "disable" setting is worth having. Masking hides a symptom.
+
+The skin already had the right idiom. `Background_NotVideo` drops the background artwork during
+background video playback using `<visible>` plus `Hidden` / `Visible` fade animations — not a
+conditional fade to zero opacity — so Kodi releases the control instead of drawing it invisibly.
+It is pulled into `Background_FlixArt`, `Background_Fanart`, `Background_Blur` and
+`Background_Image`: the same controls this setting needs to reach.
+
+So the wall gate is a second `<visible>` on those same controls. Kodi ANDs multiple `<visible>`
+tags, so the two conditions compose, and **the crossfade is inherited from `Background_NotVideo`
+at no cost** — no new animation was needed on the two artwork controls.
+
+### 24b. Why the obvious one-line edit was wrong
+
+`Exp_BackgroundArtwork_IsHidden` is the skin's existing "hide the fanart" switch, and adding
+`[Skin.HasSetting(Background.DisableWallFanart) + $EXP[Exp_View_WallMode]]` to it is a one-line
+change. **It does not work, for two independent reasons.**
+
+**1. It only reaches the sharp panel.** That expression gates `Background_FlixArt` and
+`Background_Fanart`. It does *not* gate `Background_Blur_Quadrants`, the blurred fanart surround,
+which has no hide condition of any kind. With `TMDbHelper.EnableBlur` on, the blur survives every
+"hide artwork" route in the skin.
+
+The two mask layers that draw above it are not opaque enough to cover for that. Measured from
+`media/Textures.xbt` (alpha channel, composited as `1-(1-a1)(1-a2)`):
+
+| | x=40 | x=800 | x=1500 | x=1900 |
+|---|---|---|---|---|
+| **y=40** | 65% | 60% | 62% | 62% |
+| **y=400** | 80% | 69% | 76% | 77% |
+| **y=800** | 100% | 98% | 80% | 77% |
+| **y=1060** | 100% | 100% | 98% | 97% |
+
+`combined_flixart.png` is opaque bottom-left and alpha 3–5 top-right; `combined_overlay.png` peaks
+at 195/255 and is the complement. Around 60% coverage across the top band means blurred fanart
+reads through at roughly 35–40% behind the wall grid's top row. That is fanart dimmed, not
+disabled.
+
+**2. It has side effects outside the background stack.** `Exp_BackgroundArtwork_IsHidden` feeds
+`Exp_BackgroundArtwork_IsOverlay`, which is consumed elsewhere. A term added for wall views would
+switch the overlay wash on as a by-product.
+
+Hence a separate expression, `Exp_BackgroundArtwork_WallIsDisabled`, in `Includes_Expressions.xml`
+next to its neighbours. **Do not fold it into `Exp_BackgroundArtwork_IsHidden` later.**
+
+### 24c. The load-time / runtime trap
+
+Which viewtype is showing is a **runtime** condition. Kodi evaluates `<include condition="...">`
+when the window is *loaded*, so the existing pattern in `Background_Blur` —
+
+```xml
+<include content="Background_Blur_Quadrants" condition="Skin.HasSetting(TMDbHelper.EnableBlur)">
+```
+
+— cannot be extended with a view test. That is why every gate added here is a `<visible>` on a
+control, matching how `Exp_View_HasHeader` is consumed in `Includes_Views.xml`. The pre-existing
+`Skin.HasSetting` include conditions are left exactly as they were.
+
+### 24d. Why a replacement base layer was needed
+
+Hiding all three artwork layers leaves nothing behind them. The only always-on layer above that
+point is `combined_flixart.png`, alpha 3–5 in the top-right — so the wall would have fallen
+through to black up there.
+
+`Background_Wall_NoFanart` (new include) supplies the base. It draws `Background_Image`, which
+resolves `Image_SimpleBackground` — the user's "Customise Window Background" image, else
+`purple_blur.jpg` — over a solid `ColorBackground` fill.
+
+* **The solid fill is a guarantee, not decoration.** `Background.Image` accepts any path; a user
+  PNG with alpha would otherwise let the view show through.
+* **It is called from `Background_Main_Standard`, not from `Background_Blur`.** `Background_Blur`
+  is skipped entirely when `Background.ArtworkStyle` is `Simple`, which is precisely the style
+  with no other background layer — a base added there would be missing where it is most needed.
+  At the `Background_Main_Standard` level it covers every artwork style and both blur states.
+* **It is the first child**, so `Background_Main_Overlay`'s masks still draw on top. The theme
+  gradient is preserved and the result matches the skin's ordinary "no fanart available" look
+  rather than a flat fill.
+
+`Background_Main_Plain` was deliberately left alone: `Exp_PlainBackgroundWindows` lists only
+settings-type windows, none of which can host a wall view.
+
+### 24e. Both blur modes are covered
+
+| `TMDbHelper.EnableBlur` | Surround | Sharp panel |
+|---|---|---|
+| On | `Background_Blur_Quadrants` — blurred fanart, **gated** | `Background_FlixArt`, **gated** |
+| Off | `Background_Image` — static, not fanart, left alone | `Background_Fanart`, **gated** |
+
+With blur off, `Includes_Images_Background_FakeBlur.xml` redefines `Image_Foreground` to the raw
+ListItem fanart, so `Background_Fanart` still needs the gate even though the surround does not.
+`Background_FlixArt` is also the control used by the `Simple` artwork style, so one gate on it
+covers both of its call sites.
+
+### 24f. Total scope
+
+| File | Change |
+|---|---|
+| `Includes_Expressions.xml` | new `Exp_BackgroundArtwork_WallIsDisabled` |
+| `Includes_Background.xml` | 3 `<visible>` gates; new `Background_Wall_NoFanart`; called from `Background_Main_Standard` |
+| `Includes_SkinSettings.xml` | new radiobutton, id `025`, slevel 2 |
+| `language/*/strings.po` | `#31606` added to all 13 |
+
+`Background_FlixArt`, `Background_Fanart` and `Background_Blur_Quadrants` are each referenced only
+within `Includes_Background.xml`, so the gates cannot leak into another consumer.
+
+`Background_Blur_Quadrants` needed its own `Hidden` / `Visible` fade animations (400ms, matching
+`Background_NotVideo`) because, unlike the two artwork controls, it does not pull in
+`Background_NotVideo` and so had none to inherit. Without them the switch into a wall view
+hard-cut.
+
+**Do not add `<param>` declarations to `Background_Blur_Quadrants`.** It has no `<definition>`
+block, so its `$PARAM[flixart_size_w]` / `_h` values resolve from the calling include
+(`Background_Blur`). Declaring them locally would shadow the caller with empty values — the same
+class of failure recorded in section 21e.
+
+### 24g. id and polarity choices
+
+`025`: ids `001`–`018` and `020`–`024` are taken in `SkinSettings_Items_Behaviour`. `019` remains
+the deliberately-skipped gap from the removed Spotlight trailer setting (see the note on id `024`)
+so it is not read as belonging to the Trailers group. baseid is `5`, so the control is `5025`.
+
+`slevel 2` matches the "Background" section label. Anything lower would leave the entry visible at
+settings level 0/1 with its own header hidden, orphaning it under the Playback group.
+
+Polarity follows section 20 rather than the neighbouring entries: a `Disable`-named setting with a
+*positive* `<selected>`, so the setting name, the label and the radio state all move in the same
+direction.
+
+### 24h. What this does not do
+
+It stops the **skin** from loading fanart on wall views. It does not stop **TMDb Helper**: the
+monitor still populates `TMDbHelper.ListItem.BlurImage` and still generates blurred image files as
+the grid is scrolled, because that work is driven by the container, not by what the skin renders.
+Eliminating it means turning off `TMDbHelper.EnableBlur`, which is a different setting with
+skin-wide effects.
+
+It also does not affect background video. `Background_Image` carries `Background_NotVideo`, and
+`Background_Video` sits outside the gated group, so video backgrounds behave exactly as before.
+
+### 24i. Pre-existing gap fixed in passing
+
+String `#31605` ("Wall Kaleido", section 23) had only been added to `en_gb`; the other 12 language
+files lacked it. Kodi falls back to English for a missing string, so nothing was broken, but it was
+inconsistent with `#31602`–`#31604`, which are in all 13. `#31605` has been backfilled to the
+remaining 12 alongside `#31606`.
+
+### 24j. Version bumped to 1.0.6
+
+`addon.xml` `1.0.5` → `1.0.6`. Same reasoning as sections 19, 20 and 23n. The Settings version line
+reads `System.AddonVersion(skin.arctic.vibe)` (section 11), so it follows automatically.
 
 ---
 
@@ -2120,10 +2150,6 @@ setting still governs this panel.
 | Kaleido panel size | `kaleido_panel_w` / `_h` (a set — see 23c) | 771.42 x 310 |
 | Kaleido tuck under poster | `kaleido_tuck` (+ `kaleido_ext_w`, `kaleido_right_x`, `kaleido_pad_tucked`) | 40 |
 | Kaleido hover delay | `delay="3000"` on **both** animations in `View_Kaleido_Panel` (literal — not a constant) | 3000ms |
-| Kaleido slide feel | copied from `Animation_Slide_In` (Options menu); raise `time`, never the distance | fade 300 sine-out / slide 400 cubic-out |
-| Kaleido plot scroll delay | `autoscroll delay` on the plot textbox = hover delay + 5000 | 8000ms |
-| Kaleido plot height | must stay a multiple of 40 (font line grid) | 160 = 4 lines |
-| Kaleido title height | one line of `font_head_bold` (worst-case line height 48.4px) | 50 |
-| Kaleido title overflow | `<scroll>false</scroll>` → ellipsis; omitting the tag makes it scroll | truncate |
+| Wall fanart on/off | `Background.DisableWallFanart` → `Exp_BackgroundArtwork_WallIsDisabled` | off (fanart shown) |
 
 10.8px = 1% of screen height. Remember to update `-name` negative twins.

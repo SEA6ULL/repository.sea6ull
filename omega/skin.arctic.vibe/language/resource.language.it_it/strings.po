@@ -2853,3 +2853,13 @@ msgstr ""
 msgctxt "#31604"
 msgid "Show section name"
 msgstr ""
+
+#: /1080i/Includes_Views_Wall.xml
+msgctxt "#31605"
+msgid "Wall Kaleido"
+msgstr ""
+
+#: /1080i/Includes_SkinSettings.xml
+msgctxt "#31606"
+msgid "Disable fanart for wall viewtypes"
+msgstr ""

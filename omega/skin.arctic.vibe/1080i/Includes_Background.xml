@@ -35,6 +35,13 @@
                 <texture background="true" diffuse="$PARAM[diffuse]">$VAR[Image_Foreground]</texture>
                 <animation effect="fade" start="100" end="0" reversible="false" time="300" condition="$EXP[Exp_BackgroundArtwork_IsHidden]">Conditional</animation>
                 <animation effect="fade" start="0" end="100" reversible="false" delay="300" time="background_fadetime" condition="!$EXP[Exp_BackgroundArtwork_IsHidden]">Conditional</animation>
+                <!-- SKINMOD: wall fanart disable. <visible>, not a conditional fade to zero, so
+                     Kodi drops the control and releases the texture instead of drawing it under
+                     an opaque layer. Background_NotVideo below already supplies Hidden/Visible
+                     fade animations, which apply to any visibility change - so this inherits the
+                     crossfade and needs no animation of its own. Kodi ANDs multiple <visible>
+                     tags on one control, so the two conditions compose. See MOD_CHANGELOG 24. -->
+                <visible>!$EXP[Exp_BackgroundArtwork_WallIsDisabled]</visible>
                 <include>Background_NotVideo</include>
             </control>
         </definition>
@@ -50,6 +57,10 @@
                 <texture background="true">$PARAM[texture]</texture>
                 <animation effect="fade" start="100" end="0" reversible="false" time="300" condition="$EXP[Exp_BackgroundArtwork_IsHidden]">Conditional</animation>
                 <animation effect="fade" start="0" end="100" reversible="false" delay="300" time="background_fadetime" condition="!$EXP[Exp_BackgroundArtwork_IsHidden]">Conditional</animation>
+                <!-- SKINMOD: wall fanart disable - this is the !TMDbHelper.EnableBlur path, where
+                     Image_Foreground is redefined by Includes_Images_Background_FakeBlur.xml to
+                     the raw ListItem fanart. Same gate as Background_FlixArt. MOD_CHANGELOG 24. -->
+                <visible>!$EXP[Exp_BackgroundArtwork_WallIsDisabled]</visible>
                 <include>Background_NotVideo</include>
             </control>
         </definition>
@@ -73,6 +84,20 @@
 
     <include name="Background_Blur_Quadrants">
         <control type="group">
+            <!-- SKINMOD: wall fanart disable. This group is the blurred fanart surround and is
+                 the layer that made a masking approach unworkable - it is not gated by
+                 Exp_BackgroundArtwork_IsHidden, so it survives every other "hide the artwork"
+                 route in the skin. Gated here on the group rather than on its four child images
+                 so all four textures are released together. MOD_CHANGELOG 24.
+                 Note: this include has no <definition>, so $PARAM values resolve from the
+                 calling include (Background_Blur). Do not add <param> declarations here. -->
+            <visible>!$EXP[Exp_BackgroundArtwork_WallIsDisabled]</visible>
+            <!-- Unlike Background_FlixArt / Background_Fanart, this group does not pull in
+                 Background_NotVideo and so has no Hidden/Visible animations to inherit. Adding
+                 them here matches Background_NotVideo's 400ms timings, so switching into and out
+                 of a wall view crossfades rather than hard-cutting. -->
+            <animation effect="fade" start="100" end="0" time="400" tween="sine" easing="in" reversible="false">Hidden</animation>
+            <animation effect="fade" start="0" end="100" time="400" tween="sine" easing="in" reversible="false">Visible</animation>
             <!-- Left -->
             <control type="group">
                 <right>$PARAM[flixart_size_w]</right>
@@ -233,10 +258,49 @@
         </control>
     </include>
 
+    <!-- SKINMOD: replacement base drawn only while "Disable fanart for wall viewtypes" is
+         suppressing the artwork. Without it the top-right of the screen would fall through to
+         nothing: the only always-on layer above this point is combined_flixart.png, whose alpha
+         up there is 3-5 of 255. See MOD_CHANGELOG section 24.
+
+         Placed in Background_Main_Standard rather than inside Background_Blur on purpose.
+         Background_Blur is skipped entirely when Background.ArtworkStyle is Simple, so a base
+         added there would be missing in exactly the style that has no other background layer.
+         Here it covers every artwork style and both TMDbHelper.EnableBlur states.
+
+         Image_SimpleBackground is the skin's own non-fanart background (the user's
+         "Customise Window Background" image, else purple_blur.jpg), so a custom background is
+         respected. The solid ColorBackground fill underneath is a guarantee, not decoration:
+         Background.Image accepts any path and a user PNG with alpha would otherwise let the
+         view show through. Background_Image carries Background_NotVideo, so background video
+         still plays through this layer untouched. -->
+    <include name="Background_Wall_NoFanart">
+        <param name="fadetime">background_fadetime</param>
+        <definition>
+            <control type="group">
+                <visible>$EXP[Exp_BackgroundArtwork_WallIsDisabled]</visible>
+                <animation effect="fade" start="0" end="100" time="400" tween="sine" easing="in" reversible="false">Visible</animation>
+                <animation effect="fade" start="100" end="0" time="400" tween="sine" easing="in" reversible="false">Hidden</animation>
+                <control type="image">
+                    <texture colordiffuse="$VAR[ColorBackground]">common/white.png</texture>
+                    <include>Background_NotVideo</include>
+                </control>
+                <include content="Background_Image">
+                    <param name="fadetime">$PARAM[fadetime]</param>
+                </include>
+            </control>
+        </definition>
+    </include>
+
     <include name="Background_Main_Standard">
         <control type="group">
             <animation effect="fade" start="0" end="100" time="background_fadetime">Visible</animation>
             <animation effect="fade" start="100" end="0" time="background_fadetime">Hidden</animation>
+            <!-- SKINMOD: first child so it sits behind the artwork layers, and above nothing
+                 else - Background_Main_Overlay's masks still draw on top, which keeps the
+                 theme gradient and makes the result identical to the skin's ordinary
+                 "no fanart available" look rather than a flat fill. MOD_CHANGELOG 24. -->
+            <include>Background_Wall_NoFanart</include>
             <include condition="!Skin.String(Background.ArtworkStyle,Simple)">Background_Blur</include>
             <include>Background_Artwork</include>
         </control>
