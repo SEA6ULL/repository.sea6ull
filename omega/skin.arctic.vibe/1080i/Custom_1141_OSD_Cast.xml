@@ -13,6 +13,7 @@
         </include>
 
         <control type="group">
+            <include>Animation_OSD_MatchContent_Bottom</include> <!-- SKINMOD -->
             <include>OSD_Info_Dimensions</include>
 
             <include content="OSD_Info_Viewline">

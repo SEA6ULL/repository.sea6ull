@@ -1427,6 +1427,13 @@
         <param name="is_collection">false</param>
         <param name="is_web">false</param>
         <param name="visible">true</param>
+        <!-- SKINMOD: Aspect ratio. Two params rather than one infolabel name, because the
+             TMDbHelper base_* branch needs a fallback chain and therefore its label and its
+             visible condition are no longer derived from the same single source. Defaults are
+             chosen so a caller that passes neither renders nothing rather than a broken
+             condition. -->
+        <param name="videoaspect_label" />
+        <param name="videoaspect_visible">false</param>
         <definition>
             <include content="Info_Line_VideoQuality_Resolution" condition="!Skin.HasSetting(Infoline.DisableSource) | !Skin.HasSetting(Info.EnablePillboxStyle)">
                 <param name="visible">$PARAM[visible]</param>
@@ -1437,6 +1444,16 @@
                 <param name="is_fhd">[Integer.IsGreater($PARAM[listitem_videoresolution],720)]</param>
                 <param name="is_hd">[Integer.IsEqual($PARAM[listitem_videoresolution],720)]</param>
                 <param name="is_sd">[!String.IsEmpty($PARAM[listitem_videoresolution])]</param>
+            </include>
+            <!-- SKINMOD: Aspect ratio pill, sits immediately after the resolution / WEB pill.
+                 Deliberately ONE control with the value printed directly, not one control per
+                 bucket the way Resolution / HDRType / AudioChannels are built. Kodi already
+                 normalises VideoAspect to a fixed set of ~11 ratio strings, so bucketing here
+                 would add ~22 controls per Info_Panel instance for no gain. See MOD_CHANGELOG. -->
+            <include content="Info_Line_VideoQuality_Object" condition="!Skin.HasSetting(Infoline.DisableAspect)">
+                <param name="colordiffuse">$PARAM[colordiffuse]</param>
+                <param name="label">$PARAM[videoaspect_label]</param>
+                <param name="visible">$PARAM[visible] + [$PARAM[videoaspect_visible]]</param>
             </include>
             <include content="Info_Line_VideoQuality_HDRType" condition="!Skin.HasSetting(Infoline.DisableHDR)">
                 <param name="visible">$PARAM[visible]</param>
@@ -1485,6 +1502,9 @@
                     <param name="is_collection">[$PARAM[container]ListItem.IsCollection | !String.IsEmpty($PARAM[container]ListItem.Set)]</param>
                     <param name="is_web">[[String.IsEqual($PARAM[container]ListItem.DBType,movie) | String.IsEqual($PARAM[container]ListItem.DBType,episode) | String.IsEqual($PARAM[container]ListItem.DBType,video)] + !String.IsEqual($PARAM[container]ListItem.Property(tmdb_type),person)]</param>
                     <param name="listitem_videoresolution">$PARAM[container]ListItem.VideoResolution</param>
+                    <!-- SKINMOD: aspect ratio, directly-focused listitem. -->
+                    <param name="videoaspect_label">$INFO[$PARAM[container]ListItem.VideoAspect,,:1]</param>
+                    <param name="videoaspect_visible">!String.IsEmpty($PARAM[container]ListItem.VideoAspect)</param>
                     <param name="listitem_dbtype">$PARAM[container]ListItem.DBType</param>
                     <param name="listitem_hdrtype">$PARAM[container]ListItem.HdrType</param>
                     <param name="listitem_audiochannels">$PARAM[container]ListItem.AudioChannels</param>
@@ -1496,6 +1516,20 @@
                     <param name="is_collection">[!String.IsEmpty(Window(Home).Property(TMDbHelper.ListItem.base_iscollection)) | !String.IsEmpty(Window(Home).Property(TMDbHelper.ListItem.base_set))]</param>
                     <param name="is_web">[[String.IsEqual(Window(Home).Property(TMDbHelper.ListItem.base_dbtype),movie) | String.IsEqual(Window(Home).Property(TMDbHelper.ListItem.base_dbtype),episode) | String.IsEqual(Window(Home).Property(TMDbHelper.ListItem.base_dbtype),video)] + !String.IsEqual($PARAM[container]ListItem.Property(tmdb_type),person)]</param>
                     <param name="listitem_videoresolution">Window(Home).Property(TMDbHelper.ListItem.base_videoresolution)</param>
+                    <!-- SKINMOD: aspect ratio, TMDbHelper base_* branch.
+                         base_videoaspect does NOT exist - TMDbHelper does not expose it, which is
+                         why the pill was invisible everywhere except the OSD in v1.0.7. This branch
+                         is the one that renders in ordinary library views and in the info dialog,
+                         because TMDBHelper.WidgetContainer is empty there, so the branch-1 test
+                         Integer.IsEqual(<empty>,System.CurrentControlID) is false.
+                         It is still read first in case a future TMDbHelper adds it, then falls back
+                         to the real listitem. The fallback is GUARDED on WidgetContainer being
+                         empty: that is exactly the case where nothing else is registered, so
+                         ListItem is guaranteed to be the item the panel is describing. Without the
+                         guard, a combined view (which registers a different container) could show
+                         this pill from one list and the resolution / HDR pills from another. -->
+                    <param name="videoaspect_label">$VAR[Label_Info_VideoAspect_Base]</param>
+                    <param name="videoaspect_visible">!String.IsEmpty(Window(Home).Property(TMDbHelper.ListItem.base_videoaspect)) | [String.IsEmpty(Window.Property(TMDBHelper.WidgetContainer)) + !String.IsEmpty(ListItem.VideoAspect)]</param>
                     <param name="listitem_dbtype">Window(Home).Property(TMDbHelper.ListItem.base_dbtype)</param>
                     <param name="listitem_hdrtype">Window(Home).Property(TMDbHelper.ListItem.base_hdrtype)</param>
                     <param name="listitem_audiochannels">Window(Home).Property(TMDbHelper.ListItem.base_audiochannels)</param>

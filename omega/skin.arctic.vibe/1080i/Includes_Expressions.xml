@@ -282,6 +282,13 @@
     <expression name="Exp_OSD_QuickInfo">[$EXP[Exp_OSD_PVRChannelSwitch] | Window.IsActive(fullscreeninfo) | $EXP[Exp_OSD_DelayInfo]]</expression>
 
     <expression name="Exp_OSD_HideControls">[Window.IsActive(1140) | Window.IsActive(1141) | Window.IsActive(1142) | Window.IsActive(videobookmarks) | Window.IsActive(pvrosdguide) | Window.IsActive(pvrosdchannels) | Window.IsActive(script-upnext-stillwatching.xml) | Window.IsActive(script-upnext-upnext.xml)]</expression>
+    <!-- SKINMOD: gate for "Match OSD to content".
+         Deliberately contains NO live player infolabel. Player.HasVideo goes false the instant
+         playback stops, while the five OSD windows are still fading out, which made the OSD snap
+         back to its un-inset position for the duration of those fades. Everything this gate tests
+         survives teardown. The music guard replaces Player.HasVideo: DialogSeekBar is shared with
+         the visualisation screen, which has no letterbox bars to escape. -->
+    <expression name="Exp_OSD_MatchContent">Skin.HasSetting(OSD.MatchToContent) + !Window.IsVisible(MusicVisualisation.xml)</expression>
 
     <expression name="Exp_OSD_ActiveSlides">[[Window.IsActive(VideoFullScreen.xml) | Window.IsActive(MusicVisualisation.xml)] + !$EXP[Exp_InfoDialogs] + !Window.IsActive(1193)]</expression>
     <expression name="Exp_OSD_VisibleSlides">[[Window.IsVisible(VideoFullScreen.xml) | Window.IsVisible(MusicVisualisation.xml)] + !$EXP[Exp_InfoDialogs] + !Window.IsVisible(1193)]</expression>

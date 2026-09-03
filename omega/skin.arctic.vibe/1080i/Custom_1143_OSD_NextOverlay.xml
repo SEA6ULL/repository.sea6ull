@@ -6,6 +6,7 @@
 
         <control type="group">
             <include>OSD_HideControls</include>
+            <include>Animation_OSD_MatchContent_Top</include> <!-- SKINMOD -->
             <control type="list" id="513">
                 <left>-1920</left>
                 <width>1</width>

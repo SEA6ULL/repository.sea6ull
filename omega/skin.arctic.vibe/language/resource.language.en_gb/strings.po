@@ -2913,3 +2913,13 @@ msgstr ""
 msgctxt "#31606"
 msgid "Disable fanart for wall viewtypes"
 msgstr ""
+
+#: /1080i/Includes_Items.xml
+msgctxt "#31607"
+msgid "Aspect ratio"
+msgstr ""
+
+#: /1080i/Includes_Items.xml
+msgctxt "#31608"
+msgid "Match OSD to content"
+msgstr ""

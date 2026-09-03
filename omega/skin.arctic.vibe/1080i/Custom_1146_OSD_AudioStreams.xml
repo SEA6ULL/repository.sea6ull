@@ -7,6 +7,7 @@
 
         <control type="group">
             <include>OSD_HideControls</include>
+            <include>Animation_OSD_MatchContent_Bottom</include> <!-- SKINMOD -->
             <left>view_pad</left>
             <right>view_pad</right>
 

@@ -507,6 +507,9 @@
             <include content="Info_Line_VideoQuality">
                 <param name="textcolor">panel_fg_90</param>
                 <param name="listitem_videoresolution">VideoPlayer.VideoResolution</param>
+                <!-- SKINMOD: aspect ratio while playing. -->
+                <param name="videoaspect_label">$INFO[VideoPlayer.VideoAspect,,:1]</param>
+                <param name="videoaspect_visible">!String.IsEmpty(VideoPlayer.VideoAspect)</param>
                 <param name="listitem_audiochannels">VideoPlayer.AudioChannels</param>
                 <param name="listitem_hdrtype">VideoPlayer.HdrType</param>
                 <param name="visible">$PARAM[visible]</param>
@@ -1152,7 +1155,39 @@
         </control>
     </include>
 
+    <!-- SKINMOD -->
+    <include name="Animation_OSD_MatchContent_Dim">
+        <definition>
+            <animation effect="zoom" start="100,100" end="100,$PARAM[zoom]" center="960,540" time="0" condition="$EXP[Exp_OSD_MatchContent] + String.IsEqual(Window(Home).Property(SkinMod.OSDAspect),$PARAM[aspect])" reversible="true">Conditional</animation>
+        </definition>
+    </include>
+
     <include name="OSD_Background_Dim">
+        <!-- SKINMOD: "Match OSD to content" wrapper.
+             The second image below is a FULL-FRAME tint (no top/bottom/height set) shown whenever
+             any OSD sub-window is open. On a CIH setup that paints the letterbox bars grey, which
+             both looks wrong and can defeat a projector's automatic black-bar detection, causing it
+             to re-zoom mid-film. Moving the OSD without fixing this would leave the more disruptive
+             half of the problem in place.
+
+             A slide cannot fix it because the layer needs to SHRINK, not move, so a zoom is used.
+             Each zoom percentage is the active image height as a fraction of 1080:
+             (1920/aspect) / 1080. Distortion is irrelevant on a flat tint and a vertical gradient.
+             Scaling about the frame centre also lands the bottom-anchored gradient layer
+             (bottom 0, height 240) correctly, so one animation handles both layers.
+
+             Mutually exclusive on VideoAspect for the same reason as the slides - Kodi stacks
+             conditional animations, and two matching zooms would MULTIPLY.
+
+             Gated on VideoFullScreen because MusicVisualisation.xml includes this same block. -->
+        <control type="group">
+            <include content="Animation_OSD_MatchContent_Dim"><param name="aspect">1.85</param><param name="zoom">96.2</param></include>
+            <include content="Animation_OSD_MatchContent_Dim"><param name="aspect">2.00</param><param name="zoom">88.9</param></include>
+            <include content="Animation_OSD_MatchContent_Dim"><param name="aspect">2.20</param><param name="zoom">80.8</param></include>
+            <include content="Animation_OSD_MatchContent_Dim"><param name="aspect">2.35</param><param name="zoom">75.7</param></include>
+            <include content="Animation_OSD_MatchContent_Dim"><param name="aspect">2.40</param><param name="zoom">74.1</param></include>
+            <include content="Animation_OSD_MatchContent_Dim"><param name="aspect">2.55</param><param name="zoom">69.7</param></include>
+            <include content="Animation_OSD_MatchContent_Dim"><param name="aspect">2.76</param><param name="zoom">64.4</param></include>
         <control type="image" id="1">
             <bottom>0</bottom>
             <height>240</height>
@@ -1168,6 +1203,7 @@
             <visible>Window.IsActive(DialogSeekBar.xml) | Window.IsVisible(1152)</visible>
             <visible>Window.IsActive(videoosd) | Window.IsActive(musicosd) | Window.IsActive(1140) | Window.IsActive(1141) | Window.IsActive(1142) | Window.IsActive(1143) | Window.IsActive(1144) | Window.IsActive(1145) | Window.IsActive(1146) | Window.IsActive(1147) | Window.IsActive(1148) | Window.IsActive(1149) | Window.IsVisible(videobookmarks) | Window.IsVisible(pvrosdguide) | Window.IsVisible(pvrosdchannels) | Window.IsVisible(1152) | Window.IsActive(script-upnext-stillwatching.xml) | Window.IsActive(script-upnext-upnext.xml)</visible>
         </control>
+        </control> <!-- SKINMOD: close Match-OSD-to-content wrapper -->
     </include>
 
     <include name="OSD_CustomDialog_FakeButton">

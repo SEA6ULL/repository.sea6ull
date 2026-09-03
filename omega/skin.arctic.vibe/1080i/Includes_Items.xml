@@ -186,6 +186,16 @@
             <enable>Skin.HasSetting(Info.EnablePillboxStyle)</enable>
             <label>$LOCALIZE[21870]</label>
         </include>
+        <!-- SKINMOD: Aspect ratio tag. Follows the existing inverted "Disable" convention so that
+             an unset setting (a fresh profile, or Reset) leaves it ON like every other tag here. -->
+        <include content="Settings_Button" description="Aspect ratio">
+            <param name="id">8007</param>
+            <param name="control">radiobutton</param>
+            <param name="dialog">true</param>
+            <onclick>Skin.ToggleSetting(Infoline.DisableAspect)</onclick>
+            <selected>!Skin.HasSetting(Infoline.DisableAspect)</selected>
+            <label>$LOCALIZE[31607]</label>
+        </include>
         <include content="Settings_Button" description="HDR">
             <param name="id">8002</param>
             <param name="control">radiobutton</param>
@@ -223,6 +233,7 @@
             <param name="control">button</param>
             <param name="dialog">true</param>
             <onclick>Skin.SetBool(Infoline.DisableSource)</onclick>
+            <onclick>Skin.SetBool(Infoline.DisableAspect)</onclick> <!-- SKINMOD -->
             <onclick>Skin.SetBool(Infoline.DisableHDR)</onclick>
             <onclick>Skin.SetBool(Infoline.DisableAudioChannels)</onclick>
             <onclick>Skin.SetBool(Infoline.DisableVersion)</onclick>
@@ -289,6 +300,18 @@
             <label>$LOCALIZE[207] + $LOCALIZE[31202]</label>
             <selected>!Skin.HasSetting(OSD.InfoOverlay.DisablePlotRatingsOnInfo)</selected>
             <onclick>Skin.ToggleSetting(OSD.InfoOverlay.DisablePlotRatingsOnInfo)</onclick>
+        </include>
+
+        <!-- SKINMOD: Match OSD to content. Positive-sense setting, so unset (fresh profile /
+             Reset) means OFF, which is correct since the inset is only right on a zoom-capable
+             projector. -->
+        <include content="Settings_Button" description="Match OSD to content">
+            <param name="dialog">true</param>
+            <param name="id">8007</param>
+            <param name="control">radiobutton</param>
+            <label>$LOCALIZE[31608]</label>
+            <selected>Skin.HasSetting(OSD.MatchToContent)</selected>
+            <onclick>Skin.ToggleSetting(OSD.MatchToContent)</onclick>
         </include>
 
         <include content="Settings_Label">

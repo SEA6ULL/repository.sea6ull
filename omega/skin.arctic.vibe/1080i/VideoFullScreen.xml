@@ -1,11 +1,14 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <window>
     <include>Animation_OSD_Fullscreen_Change</include>
+    <!-- SKINMOD: latch the content aspect for "Match OSD to content". See Includes_Animations.xml. -->
+    <onload>SetProperty(SkinMod.OSDAspect,$INFO[VideoPlayer.VideoAspect],Home)</onload>
     <onload>ClearProperty(OSDRelaunchFullscreen,Home)</onload>
     <controls>
         <include>OSD_Background_Dim</include>
 
         <control type="grouplist" id="0">
+            <include>Animation_OSD_MatchContent_Top</include> <!-- SKINMOD -->
             <orientation>vertical</orientation>
             <centertop>100</centertop>
             <height>120</height>

@@ -17,6 +17,7 @@
             <visible>!Window.IsActive(1141)</visible>
 
             <include>Animation_OSD_Dialog_VisibleChange</include>
+            <include>Animation_OSD_MatchContent_Bottom</include> <!-- SKINMOD -->
             <control type="group">
                 <include>OSD_Info_Dimensions</include>
 

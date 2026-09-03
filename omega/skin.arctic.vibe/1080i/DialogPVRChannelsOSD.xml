@@ -7,6 +7,7 @@
     <onload>SetProperty(TMDbHelper.WidgetContainer,11)</onload>
     <controls>
         <control type="group">
+            <include>Animation_OSD_MatchContent_Bottom</include> <!-- SKINMOD -->
             <include>OSD_Info_Dimensions</include>
 
             <control type="group">

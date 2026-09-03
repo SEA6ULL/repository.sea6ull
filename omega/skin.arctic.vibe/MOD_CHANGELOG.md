@@ -1,6 +1,6 @@
 # Arctic Vibe — Mod Changelog
 
-Ships as **Arctic Vibe** (`skin.arctic.vibe`, v1.0.6) by sea6ull.
+Ships as **Arctic Vibe** (`skin.arctic.vibe`, v1.0.8) by sea6ull.
 A modified fork of **Arctic Fuse 2** (`skin.arctic.fuse.2`, v2.12.12) by jurialmunkey.
 
 This document records every change made to the upstream skin, and — where it matters —
@@ -2118,6 +2118,525 @@ reads `System.AddonVersion(skin.arctic.vibe)` (section 11), so it follows automa
 
 ---
 
+## 25. Aspect ratio tag on the info line
+
+**Key files:** `1080i/Includes_Info.xml`, `1080i/Includes_OSD.xml`, `1080i/Includes_Items.xml`,
+`1080i/Includes_Labels.xml`, `language/resource.language.en_gb/strings.po`
+
+A new pill on the info line, immediately after the resolution / `WEB` pill, showing the video
+aspect ratio as e.g. `2.40:1`. Appears in every viewtype that has an info panel (Wall viewtypes
+have none), in the information dialog, and in the OSD. Controlled by a new entry in
+*Skin Settings → Layout → Customise style → Video Info - Widgets*.
+
+### Where the data comes from — and where it does not
+
+The pill reads Kodi's `ListItem.VideoAspect` (`VideoPlayer.VideoAspect` in the OSD). That value
+comes from `streamdetails` in `MyVideos.db`, which Kodi populates by probing the file itself during
+a library scan when *Settings → Media → Videos → Extract video information from files* is enabled,
+or on first playback of each file. **No NFO is required.**
+
+**TMDb Helper cannot supply this and never will.** The full TMDbHelper Detailed Item property list
+contains no aspect ratio field, because the TMDb API does not carry one. The
+`TMDbHelper.ListItem.base_*` properties are not an alternative source either — they mirror the
+underlying Kodi listitem, so if `ListItem.VideoAspect` is empty for an addon item,
+`base_videoaspect` would be empty too.
+
+Consequence: **the pill renders on library items and does not render on addon / Web sources.**
+This is by design and reads coherently, because the pill next to it already says `WEB` in exactly
+that case. Getting aspect for a stream would require ffprobe on the resolved URL (a scrape/debrid
+resolve per item, wholly impractical during navigation) or an external IMDb/Wikidata scrape with
+its own cache. Both were rejected.
+
+### The two branches — and the bug this caused in the first attempt
+
+`Info_Line_VideoQuality` is instantiated **twice** inside `Info_Line`, and exactly one of the two
+is ever visible:
+
+| Branch | Visible when | Reads |
+|---|---|---|
+| 1 | `Integer.IsEqual(Window.Property(TMDBHelper.WidgetContainer),System.CurrentControlID)` | `$PARAM[container]ListItem.*` |
+| 2 | the negation of the above | `Window(Home).Property(TMDbHelper.ListItem.base_*)` |
+
+**Branch 2 is the one that renders in ordinary library views and in the information dialog.** In
+those contexts `TMDBHelper.WidgetContainer` is empty — `Includes_DialogInfo.xml` explicitly clears
+it on load, and `Includes_Views.xml` only shows that info panel when the property *is* empty — so
+`Integer.IsEqual(<empty>,System.CurrentControlID)` evaluates false and branch 2 wins. Branch 1 is
+for the widget-focused case on Home and in combined views.
+
+The first implementation passed `base_videoaspect` on branch 2, on the assumption that the `base_*`
+set mirrors the listitem the way `base_videoresolution` does. **It does not exist.** TMDbHelper
+does not expose it. The symptom was diagnostic: the resolution pill appeared everywhere (because
+`base_videoresolution` *is* populated) while the aspect pill appeared only in the OSD (which reads
+`VideoPlayer.VideoAspect` directly and bypasses both branches entirely).
+
+The fix gives branch 2 a fallback chain — `base_videoaspect` first, so a future TMDbHelper that
+adds it is picked up automatically, then the real `ListItem.VideoAspect`.
+
+**The fallback is guarded on `String.IsEmpty(Window.Property(TMDBHelper.WidgetContainer))`, and the
+guard is not optional.** That condition is precisely the case where no other container is
+registered, so `ListItem` is guaranteed to be the item the panel is describing. Without it, a
+combined view — which registers a *different* container id — could draw this pill from one list
+while the resolution and HDR pills beside it come from another. Two pills describing two different
+films, side by side, is worse than one pill missing.
+
+### Why the params were split
+
+The pill originally took one param, an infolabel name, used for both the label and the
+`String.IsEmpty()` visibility test. The fallback chain broke that: Kodi resolves variables at
+runtime to **strings**, not to infolabel references, so `$INFO[$VAR[...]]` cannot work and the
+label had to become a variable (`Label_Info_VideoAspect_Base`) while the visible condition stayed
+an explicit boolean. `Info_Line_VideoQuality` therefore takes `videoaspect_label` and
+`videoaspect_visible` as separate params.
+
+**These two must be kept in sync.** The variable's `<value>` conditions and the call site's
+visible expression encode the same fallback logic in two places; changing one without the other
+produces either an invisible pill or an empty one.
+
+| Call site | Label | Visible |
+|---|---|---|
+| `Info_Line` branch 1 | `$INFO[$PARAM[container]ListItem.VideoAspect,,:1]` | `!String.IsEmpty($PARAM[container]ListItem.VideoAspect)` |
+| `Info_Line` branch 2 | `$VAR[Label_Info_VideoAspect_Base]` | base_ present **or** [WidgetContainer empty **and** ListItem present] |
+| `OSD_Info_Line` | `$INFO[VideoPlayer.VideoAspect,,:1]` | `!String.IsEmpty(VideoPlayer.VideoAspect)` |
+
+### Implementation: one control, not eleven
+
+`Info_Line_VideoQuality_Resolution`, `_HDRType` and `Info_Line_AudioChannels` all work by
+instantiating **one control per possible value** with a `<visible>` condition on each. That pattern
+was deliberately **not** copied here.
+
+Kodi normalises `VideoAspect` to a fixed set of ~11 ratio strings (1.33, 1.37, 1.66, 1.78, 1.85,
+2.00, 2.20, 2.35, 2.40, 2.55, 2.76 — see `xbmc/utils/StreamDetails.cpp`,
+`VideoAspectToAspectDescription`). Bucketing would mean 11 controls × 2 branches × every
+`Info_Panel` instance Kodi loads in a window, each carrying a compound boolean evaluated per frame.
+A single `Info_Line_VideoQuality_Object` prints the value directly instead. The `,,:1` suffix
+formatting matches existing usage in `Info_CodecsLine`.
+
+Net cost: **two controls per info panel**, reading an infolabel that the resolution / HDR / audio
+pills beside it already read on the same focus change. No disk, no DB, no network at render time.
+
+### Setting
+
+Follows the existing **inverted** convention of this dialog (`Infoline.DisableSource`,
+`Infoline.DisableHDR`, …), so `Infoline.DisableAspect` **unset means the tag is ON**, matching the
+"everything on by default" behaviour of every other entry there. Three places enumerate the tags
+explicitly and had to be kept in sync:
+
+* `Items_Settings_InfolineAdditionalTags` — the radiobutton (id `8007`) **and** the "None" button,
+  which sets every `Disable` flag and would otherwise leave this one on.
+* `Label_Setting_AdditionalTags` — both the `NONE` test (an AND of every flag) and the summary
+  string, plus a new `Label_Setting_AdditionalTags_Aspect` variable.
+
+**Adding a future tag means touching all three.** Missing the `NONE` condition is the easy one to
+overlook: the label would never read "None" again.
+
+New string `#31607` "Aspect ratio".
+
+### Accuracy caveats (not fixable in the skin)
+
+1. The value is a **bucket, not a measurement**. A 2.39:1 film reports `2.40`.
+2. It is derived from the **stored frame dimensions**. A scope film encoded into a 1920×1080 frame
+   with baked-in black bars reports `1.78`. Most modern rips are cropped, so this is uncommon, but
+   there is no infolabel that would reveal the true framing.
+3. If the pill appears in the OSD but nowhere else, that is now a wiring bug, not a data problem —
+   the OSD reads the live decoder while everything else reads `streamdetails`. If it appears in
+   *neither*, `streamdetails` were never extracted: enable the extraction setting and rescan, or
+   play each file once. That scan is slower over SMB/NFS — a one-time library cost, not a
+   navigation cost.
+
+---
+
+## 26. Match OSD to content — keep the OSD out of the letterbox bars
+
+**Key files:** `1080i/Includes_Animations.xml`, `1080i/Includes_Expressions.xml`,
+`1080i/Includes_OSD.xml`, `1080i/Includes_Items.xml`, plus a one-line include in 14 OSD windows.
+
+For constant-image-height (CIH) projector setups. When a projector zooms scope content to fill a
+2.35/2.40 screen, the GUI zooms with it, so OSD furniture sitting in the letterbox bands is thrown
+off the top and bottom of the screen. This setting pulls the OSD inward by the bar depth, **sized
+automatically from the aspect ratio of whatever is playing.**
+
+Off by default — most people are not using a zoom-capable projector.
+*Skin Settings → Layout → Customise style → Video OSD → Overlay → Match OSD to content.*
+Positive-sense setting (`OSD.MatchToContent`), so unset means off.
+
+### Offsets
+
+Bar depth in a 1080-line frame is `(1080 - 1920/aspect) / 2`; the dim layer's zoom is the active
+image height as a fraction of 1080, `(1920/aspect) / 1080`.
+
+| VideoAspect | Active height | Slide offset | Dim zoom |
+|---|---|---|---|
+| 1.85 | 1039 | 21 | 96.2% |
+| 2.00 | 960 | 60 | 88.9% |
+| 2.20 | 873 | 104 | 80.8% |
+| 2.35 | 817 | 132 | 75.7% |
+| 2.40 | 800 | 140 | 74.1% |
+| 2.55 | 753 | 164 | 69.7% |
+| 2.76 | 696 | 192 | 64.4% |
+
+**1.78 and below are deliberately absent.** 1.78 has zero bar depth, and 1.66 and narrower are
+pillarboxed — the image already fills the frame height, so there is nothing to move away from.
+
+Kodi normalises `VideoPlayer.VideoAspect` to this fixed set of strings, so exact `String.IsEqual`
+matching is safe and no range logic is needed.
+
+### The mutual-exclusivity requirement
+
+**Kodi applies conditional animations cumulatively.** Every animation in these includes is keyed to
+one exact `VideoAspect` string, so at most one can ever be true. If these conditions were ever
+widened to ranges and two could match at once, the slide offsets would **add** and the dim zooms
+would **multiply**. Keep them exact.
+
+### Mechanism
+
+Kodi cannot make `<top>` conditional, so this uses conditional slide animations, which the skin
+already relies on heavily (`Animation_OSD_Seekbar_Slide`, `Animation_OSD_MusicArtwork_Slide`).
+`Animation_OSD_MatchContent_Slide` is the parameterised primitive; `_Bottom` and `_Top` are the
+bucket tables that instantiate it.
+
+**Direction matters and one include cannot serve both.** Bottom-anchored furniture must move up
+(negative offset) and top-anchored furniture must move down (positive); applying the wrong include
+pushes a panel further into the bar it was supposed to escape.
+
+Gated by `Exp_OSD_MatchContent`, which ANDs the setting with `Player.HasVideo` so the music
+visualisation screen — which has no letterbox bars to escape — is never affected.
+
+### Applied per window, deliberately
+
+The include is attached to the outermost group of each OSD window rather than to a shared geometry
+include such as `OSD_Info_Dimensions`.
+
+**This is the important design decision.** `OSD_Info_Dimensions` and `OSD_List_Dimensions` are
+frequently **nested** — in `Custom_1140` and `Custom_1141` the list carrying `OSD_List_Dimensions`
+sits inside the group carrying `OSD_Info_Dimensions`. Putting the animation in a shared geometry
+include would translate nested controls **twice**, cumulatively, and the bug would appear only in
+some windows. Attaching it once per window makes the translation unambiguous.
+
+Because the whole window root moves as a rigid body, **internal spacing is untouched and collisions
+are impossible by construction.** The scroll-down panels (cast, playlist, stream selectors) keep
+their existing relationships to each other.
+
+| Direction | Windows |
+|---|---|
+| Bottom | `VideoOSD.xml`, `DialogSeekBar.xml`, `VideoOSDBookmarks.xml`, `DialogPVRChannelsOSD.xml`, `Custom_1140`, `Custom_1141`, `Custom_1145`, `Custom_1146`, `Custom_1147`, `Custom_1148`, `Custom_1152` |
+| Top | `Custom_1143`, `Custom_1153`, `VideoFullScreen.xml` (codec overlay grouplist) |
+
+Music windows (`Custom_1142`, `Custom_1151`, `MusicVisualisation.xml`) are **untouched**.
+
+### The full-frame dim layer — the trap that made this necessary
+
+`OSD_Background_Dim` (included by `VideoFullScreen.xml`) has two layers. The second is
+`background/combined_flixart.png` tinted at `panel_bg_70` with **no top, bottom or height set**, so
+it covers the entire 1920×1080 frame. It becomes visible whenever any OSD sub-window is open:
+playlist, cast, info panel, stream selectors, up-next.
+
+On a CIH setup that **paints the letterbox bars grey**. Beyond looking wrong, it can defeat a
+projector's automatic black-bar detection and cause it to re-zoom to 16:9 mid-film. Moving the OSD
+without fixing this would have left the more disruptive half of the problem in place.
+
+A slide cannot fix it, because the layer needs to **shrink**, not move. The wrapper group therefore
+carries a **zoom** animation (`Animation_OSD_MatchContent_Dim`) instead, scaled about the frame
+centre. Distortion is irrelevant on a flat tint and a vertical gradient, and centre-scaling also
+lands the bottom-anchored gradient layer (`bottom 0`, `height 240`) correctly — so one animation
+handles both layers.
+
+The condition is additionally gated with `Window.IsActive(VideoFullScreen.xml)` because
+`MusicVisualisation.xml` includes the same block and must not be affected.
+
+### The teardown artefact — two separate causes
+
+Stopping playback originally showed the OSD sliding back down **three times in succession**, and
+after the first fix still showed it drawn once at the un-inset position.
+
+**Cause one: the tween.** Five windows draw OSD furniture — `DialogSeekBar`, `VideoOSD`,
+`Custom_1152`, `Custom_1153` and `VideoFullScreen` — and each fades out on its own schedule when
+the player tears down. Each carries its own copy of the slide, so a reversible 200ms tween played
+back *during* those fades and read as three separate redraws. Fixed with `time="0"`.
+
+**Cause two: live player conditions.** That left one redraw, because every condition the
+animations tested evaporated the moment playback stopped while the windows were still visible:
+`Player.HasVideo` in the gate, `String.IsEqual(VideoPlayer.VideoAspect,...)` in each bucket, and
+`Window.IsActive(VideoFullScreen.xml)` on the dim layer. The controls snapped to rest and were then
+drawn there for the length of the fades.
+
+The aspect is now **latched** into `Window(Home).Property(SkinMod.OSDAspect)` by an `<onload>` in
+`VideoFullScreen.xml` (playback start), `VideoOSD.xml` and `DialogSeekBar.xml` (every time the OSD
+appears). A window property survives teardown, so the inset holds until the windows are gone. Three
+write points because the stream may not have reported its aspect yet at `VideoFullScreen` onload —
+the property then lands empty and the first OSD open corrects it.
+
+`Exp_OSD_MatchContent` consequently contains **no live player infolabel at all**. `Player.HasVideo`
+was replaced by `!Window.IsVisible(MusicVisualisation.xml)`, which does the same job — keeping the
+inset off the shared `DialogSeekBar` during music — without dying at stop.
+
+The property is deliberately never cleared. A stale value is only ever read while an OSD window is
+on screen, and the music guard covers the one case where it could leak.
+
+**Anything added to these conditions later must also survive teardown.**
+
+### Why the transitions are instant (`time="0"`)
+
+The first working build used a 200ms tween. On stopping playback the OSD was seen sliding back
+down **three times in succession**.
+
+Cause: five separate windows draw OSD furniture — `DialogSeekBar`, `VideoOSD`, `Custom_1152`,
+`Custom_1153` and `VideoFullScreen` — and each fades out on its own schedule when the player tears
+down. Each carries its own copy of the slide, so a reversible tween plays back **during** those
+fades, and the eye reads the same furniture un-sliding at three different moments as three
+redraws.
+
+Setting `time="0"` puts every control at its rest position before the fades begin. The residual
+triple fade on stop is the stock close sequence of those stacked windows and is unrelated to this
+feature — it is visible on content with no inset at all (1.78 and below), and with
+`OSD.MatchToContent` switched off.
+
+**Do not add a tween back.** The inset only ever changes at playback start or stop, when the OSD
+is not on screen, so an animated transition can never be seen *except* as this artefact.
+
+### Known limits
+
+* **A file with baked-in black bars reports 1.78**, so the skin will not inset while the projector
+  zooms anyway. Nothing in Kodi exposes the true framing of such a file. Rips cropped to the
+  active image — the normal case — work correctly.
+* **Subtitles are not skin-controlled.** Kodi places them itself; adjust subtitle position in
+  Kodi's own settings separately.
+* **Test the projector.** Play a scope film and open the cast list. If the projector re-zooms even
+  with this setting on, its detection is reacting to something else being drawn, and the fix is on
+  the projector side (a trigger or a manual lens memory), not in the skin.
+* If the projector uses a **fixed scope lens memory** rather than zooming per content ratio, the
+  per-content offsets above will slightly overshoot or undershoot on ratios that are not the
+  screen's own. In that case, set every bucket in `_Bottom` / `_Top` to the same value.
+
+New string `#31608` "Match OSD to content".
+
+---
+
+## 27. OSD flicker on stop
+
+**Key files:** `1080i/Includes_Animations.xml`, `1080i/VideoOSD.xml`,
+`1080i/Custom_1152_OSD_VideoInfoOverlay.xml`
+
+Stopping playback produced repeated full-screen flashes. Two independent causes, found by
+comparing debug logs.
+
+### Cause one: display refresh rate switching (not a skin issue)
+
+With a 144Hz desktop and 24.000fps content, Kodi's whitelist found no exact 24Hz and no double-rate
+48Hz match and fell back to a 3:2 pulldown rate of 60Hz, switching the display on every play and
+stop:
+
+```
+38.547  SetFullScreen: 1920x1080, refresh 144.000000
+40.819  OnDisplayLost:  notify display lost event
+40.820  OnDisplayReset: notify display reset event
+```
+
+A 2.3-second monitor renegotiation, entirely outside the skin. Resolved by the user setting
+*Settings → Player → Videos → Adjust display refresh rate → Off*. Worth noting that 144 is an exact
+6x multiple of 24, so leaving the display alone also gives better motion than the 60Hz 3:2 pulldown
+Kodi was switching to.
+
+**Nothing in this skin can cause or fix that.** If flashing on stop is ever reported again, check
+for `SetFullScreen` / `OnDisplayLost` in the log before looking at any XML.
+
+### Cause two: close-fade animations outliving the renderer
+
+With refresh switching off, the logs showed the real problem. Teardown, same file, same machine:
+
+| | Estuary | Arctic Vibe |
+|---|---|---|
+| `OnPlayBackStopped` → last `Window Deinit` | **12ms** | **233ms** |
+
+The entire Arctic Vibe delay sat between `DialogSeekBar` deinitialising and `VideoOSD` /
+`VideoFullScreen` deinitialising — a 226ms gap. That is Kodi **deferring `Window Deinit` until each
+window's `WindowClose` animation completes**, and these windows carry 300ms fades.
+
+The critical detail is ordering: `CRenderManager::DeleteRenderer` runs at 46.313, roughly 70ms
+*before* the first window even begins closing. So the video plane is already gone and those fades
+play out over nothing, staggered across three windows, followed by `MyVideoNav` initialising and
+its `skinvariables-blurfallback.json` background regenerating 440ms later. That sequence of
+discrete visual steps is what was seen as flashing. Estuary has no such fades and collapses
+everything in one frame.
+
+### Fix
+
+Each `WindowClose` fade is now paired: the 300ms fade carries `condition="Player.HasMedia"`, and a
+`time="0"` twin carries `!Player.HasMedia`. Closing the OSD during playback fades exactly as
+before; stopping playback tears down immediately, like Estuary.
+
+Applied to `VideoOSD.xml`, `Custom_1152`, and `Animation_OSD_Fullscreen_Change` (which covers
+`VideoFullScreen`, `DialogSeekBar`, `DialogFullScreenInfo`, `MusicVisualisation` and the
+`OSD_Background_Dim` layers). The condition is correct everywhere it lands — none of those has
+anything to fade over once playback has ended.
+
+**Two conditional animations, not one with a shortened time.** Removing the fade outright would
+lose it during normal OSD dismissal, which is the case it exists for.
+
+### Reverted: the `Player.HasMedia` visibility guard on DialogSeekBar
+
+An earlier attempt added `<visible>Player.HasMedia</visible>` to `DialogSeekBar.xml`, on the theory
+that transient player states were re-triggering its fade-in during teardown. It reduced the flashing
+from three to two, which seemed to confirm it.
+
+**That theory was wrong** — or at least unproven. Kodi logs window init/deinit but never
+control-level `<visible>` changes, so no log could confirm it, and the real cause turned out to be
+animation timing. The guard also cost the seekbar during PVR channel switching. It has been removed
+now that the actual cause is addressed.
+
+If flashing returns, re-adding that line is the first thing to try, and it would mean the guard was
+doing real work after all.
+
+---
+
+## 28. Library artwork lost after playing from the info screen
+
+**Key files:** `1080i/Includes_Actions.xml`
+
+Playing a movie from the info screen and then stopping it returned to the library with the played
+item showing a fallback image instead of its poster. The item kept its identity — `DBID` and title
+intact — but every art field came back empty and `ListItem.Icon` had fallen back to
+`DefaultVideo.png`. Backing out of the window and re-entering restored it.
+
+### Reproduction
+
+| Route | Result |
+|---|---|
+| Arctic Vibe, play from the list | poster survives |
+| Arctic Vibe, play from the info screen | **poster lost** |
+| Estuary, play from the info screen | poster survives |
+
+Only the info-screen route was affected, in any viewtype.
+
+### Cause
+
+Arctic Fuse's info-screen play button routes through `$VAR[Action_DialogInfo_PlayMedia]`, which
+hands TMDb Helper a **path string**. TMDb Helper does not parse it — `manager.py`,
+`get_playmedia_builtin()` wraps the value in `PlayMedia(...)` — so it reaches Kodi's builtin as a
+bare path.
+
+`PlayOrQueueMedia` constructs a `CFileItem` from that string and calls `item.LoadDetails()`. For a
+video with no info tag yet, `LoadDetails` does:
+
+```cpp
+if (db.LoadVideoInfo(GetDynPath(), *tag))
+{
+  const CFileItem loadedItem{*tag};
+  UpdateInfo(loadedItem);
+```
+
+`CFileItem(const CVideoInfoTag&)` calls `SetFromVideoInfoTag`, which copies the title, path and info
+tag, **sets no artwork at all**, and ends with `FillInDefaultIcon()`:
+
+```cpp
+SetArt("icon", "DefaultVideo.png");
+```
+
+`icon` is not a separate field. `CGUIListItem::SetArt(type, url)` writes it into `m_art` — the same
+map that holds poster, fanart, thumb and landscape. The item handed to the player therefore has an
+art map of exactly one entry: `{icon: DefaultVideo.png}`.
+
+On stop, `CSaveFileState::DoWork` queues `GUI_MSG_UPDATE_ITEM` carrying a copy of that item.
+`CGUIMediaWindow` passes it to `CFileItemList::UpdateItem`, which calls `CFileItem::UpdateInfo`:
+
+```cpp
+if (!item.GetArt().empty())
+  SetArt(item.GetArt());        // CGUIListItem::SetArt(map) → m_art = art;
+```
+
+The guard is against an *empty* map. One default-icon entry is not empty, so the assignment runs and
+**replaces the list item's entire art map with that single entry**. Poster, thumb, fanart and
+landscape are gone; `Icon` reads `DefaultVideo.png`. `DBID` and the title survive because
+`UpdateInfo` copies the video info tag separately.
+
+The timing explains why the return's own directory read does not help:
+
+```
+57.203  CSaveFileState::DoWork          <- queues GUI_MSG_UPDATE_ITEM
+57.263  Window Init (MyVideoNav.xml)
+57.267  CGUIMediaWindow::GetDirectory   <- list loads WITH full art
+```
+
+`SendThreadMessage` queues, so the message is processed *after* the window has re-initialised and
+the directory has loaded. The list comes back correct and is then overwritten.
+
+**Why playing from the list is safe, and why Estuary never breaks.** Both hand the player the actual
+list item, which already satisfies `if (HasVideoInfoTag()) return true;` at the top of
+`LoadDetails`. No synthetic item is built, `FillInDefaultIcon` never runs, and the full art map
+survives the round trip. Estuary's info screen uses Kodi's native control 8, which calls
+`CGUIDialogVideoInfo::Play()` on `m_movieItem` directly. It is not avoiding the bug; it never enters
+the code path.
+
+### Fix
+
+A new first value in `Action_DialogInfo_PlayMedia`, handing library items to Kodi's native handler
+instead of a path string:
+
+```xml
+<value condition="Window.IsVisible(movieinformation) + !String.IsEmpty(ListItem.DBID) + !$EXP[Exp_IsFolder]">SendClick(movieinformation,8)</value>
+```
+
+`movieinformation` is `WINDOW_DIALOG_VIDEO_INFO` (12003) and 8 is `CONTROL_BTN_PLAY`.
+
+**The skin defines no control 8 — that does not matter.** The `SendClick` builtin addresses the
+*window*, passing the control id only as the message sender:
+
+```cpp
+CGUIMessage message(GUI_MSG_CLICKED, atoi(params[1].c_str()), windowID);
+```
+
+`CGUIDialogVideoInfo::OnMessage` reads `message.GetSenderId()` and dispatches to `Play()` on a
+match, so the handler runs whether or not a control with that id exists in the XML.
+
+`Play()` runs `CVideoPlayActionProcessor` on `m_movieItem` and calls `Close(true)` itself, so the
+`close_dialog=1190` handling of the old route is not needed. Because the skin defines no
+`CONTROL_BTN_RESUME` (id 9) either, `Play()` takes the `ProcessDefaultAction()` branch, which is the
+normal resume prompt.
+
+### Scope of the guard
+
+Three conditions, each doing real work:
+
+* `Window.IsVisible(movieinformation)` — `DialogInfo_Button_Expansion` is shared across several
+  windows, including TMDb Helper's own window 1190. Only Kodi's native dialog has the handler.
+* `!String.IsEmpty(ListItem.DBID)` — plugin items and anything unidentified have no `m_movieItem`
+  worth playing natively and must keep the old route.
+* `!$EXP[Exp_IsFolder]` — for tvshow and season items, `Play()` *navigates into* them rather than
+  playing, which is not what this button means in this skin.
+
+Everything failing those conditions falls through to the untouched upstream values below.
+
+### Notes
+
+* **Behaviour change:** the native button honours *Settings → Player → Videos → Default select
+  action*, where the old path-based route did not. If playback starts without a resume prompt, that
+  setting is the reason.
+* **Not fixed:** `Action_DialogInfo_Panel_PlayMedia` (`Includes_Items.xml:1344`) is the equivalent
+  action for the info *panel*. It reads `window.property(filenameandpath)` rather than `ListItem`
+  and is not covered here. If artwork loss appears after playing from the panel, this is why.
+* **Upstream.** `Action_DialogInfo_PlayMedia` is byte-identical in Arctic Fuse 2 v2.12.12, so this
+  reproduces on the unmodified skin. It is arguably a Kodi bug as well — `CFileItem::MergeInfo`
+  exists directly below `UpdateInfo` and performs exactly the merge that would prevent it.
+
+### Diagnostic note for future work
+
+Several plausible theories were tested and disproved before the cause was found: refresh-rate
+switching, asynchronous art loading, the wall/row/Kaleido view work, `Container.Content` emptying,
+focus landing on the wrong container, and the `library://` versus `videodb://` reload asymmetry. All
+were ruled out by evidence rather than inspection.
+
+The measurement that settled it was a temporary debug overlay in `MyVideoNav.xml` reading
+`ListItem.Art(poster)`, `Art(thumb)`, `Icon`, `DBID` and `Container.Content`, plus a second line
+reading `Container(51)` explicitly to bypass focus. Two things are worth remembering if this kind of
+problem recurs:
+
+* **Kodi never writes control text to `kodi.log`.** Label values must be read off the screen.
+* **Inside a container control, unqualified `ListItem` and `Container.*` resolve against that
+  control**, not the window's focused list. A hidden probe container reported empty for everything
+  until the infolabels were qualified as `Container(51).ListItem...`, and `Container(id)`
+  cross-references do not resolve at all inside a directory-provider `<content>` URL.
+
+---
+
 ## Validation performed after every change
 
 1. **XML well-formedness** across all files in `1080i/` (258 files at last count).
@@ -2151,5 +2670,8 @@ reads `System.AddonVersion(skin.arctic.vibe)` (section 11), so it follows automa
 | Kaleido tuck under poster | `kaleido_tuck` (+ `kaleido_ext_w`, `kaleido_right_x`, `kaleido_pad_tucked`) | 40 |
 | Kaleido hover delay | `delay="3000"` on **both** animations in `View_Kaleido_Panel` (literal — not a constant) | 3000ms |
 | Wall fanart on/off | `Background.DisableWallFanart` → `Exp_BackgroundArtwork_WallIsDisabled` | off (fanart shown) |
+| Aspect ratio pill on/off | `Infoline.DisableAspect` (inverted sense) | on |
+| Match OSD to content on/off | `OSD.MatchToContent` (positive sense) | off |
+| OSD inset per aspect ratio | bucket tables in `Animation_OSD_MatchContent_Bottom` / `_Top` / `_Dim` | 21-192px |
 
 10.8px = 1% of screen height. Remember to update `-name` negative twins.

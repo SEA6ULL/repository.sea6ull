@@ -8,6 +8,7 @@
 
         <control type="group">
             <include>OSD_HideControls</include>
+            <include>Animation_OSD_MatchContent_Top</include> <!-- SKINMOD -->
 
             <visible>!Window.IsActive(DialogPlayerProcessInfo.xml)</visible>
             <visible>!Window.IsVisible(DialogSlider.xml)</visible>

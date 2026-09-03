@@ -33,10 +33,87 @@
         <animation effect="slide" start="0" end="0,80" time="300" tween="sine" easing="inout" condition="![Window.IsVisible(musicosd) | Window.IsVisible(script-cu-lrclyrics-main.xml)]">Conditional</animation>
     </include>
 
+    <!-- SKINMOD: "Match OSD to content" (OSD.MatchToContent).
+         Pulls OSD furniture out of the letterbox bars so it is not projected off the top or bottom
+         of a constant-image-height (CIH) screen, adjusting automatically to the aspect ratio of
+         whatever is playing. Off by default - it is only correct on a zoom-capable projector.
+
+         Offsets are the bar depth in a 1080-line frame: (1080 - 1920/aspect) / 2.
+         Kodi normalises VideoPlayer.VideoAspect to a fixed set of ratio strings, so exact
+         String.IsEqual matching is safe. Ratios of 1.78 and below are omitted: their bar depth is
+         zero (1.78) or the content is pillarboxed (1.66 and narrower), where the image already
+         fills the frame height and no vertical adjustment is wanted.
+
+         Every animation here is mutually exclusive on VideoAspect, so at most one applies. Kodi
+         stacks conditional animations cumulatively - if two could ever be true at once the offsets
+         would ADD. Do not widen these conditions to ranges.
+
+         Direction matters: bottom-anchored furniture must move up (negative) and top-anchored
+         furniture must move down (positive). Applying the wrong include pushes a panel further
+         into the bar it was supposed to escape.
+
+         NOTHING IN THESE CONDITIONS MAY BE A LIVE PLAYER INFOLABEL.
+         VideoPlayer.VideoAspect, Player.HasVideo and Window.IsActive(VideoFullScreen.xml) all go
+         false the instant playback stops, while five OSD windows are still fading out. Keying on
+         any of them made the OSD snap back to its un-inset position and be drawn there for the
+         duration of the fades. The aspect is therefore LATCHED into
+         Window(Home).Property(SkinMod.OSDAspect) by an <onload> in VideoFullScreen.xml (playback
+         start), VideoOSD.xml and DialogSeekBar.xml (every time the OSD appears). A window property
+         survives teardown, so the inset holds until the windows are gone.
+         The three write points are belt and braces: at VideoFullScreen onload the stream may not
+         have reported its aspect yet, in which case the property lands empty and the first OSD
+         open corrects it.
+         The property is never cleared. A stale value is harmless because it is only read while an
+         OSD window is on screen, and the music guard in Exp_OSD_MatchContent stops a leftover
+         video aspect from insetting the shared DialogSeekBar during music playback.
+
+         time="0" IS DELIBERATE - do not "improve" this with a tween.
+         Five separate windows draw OSD furniture (DialogSeekBar, VideoOSD, Custom_1152,
+         Custom_1153, VideoFullScreen) and each fades out on its own schedule when playback stops.
+         Each carries its own copy of this animation, so with a non-zero time the reverse slide
+         plays DURING those fades and the OSD is seen tracking back down at three different
+         moments - once per fading window. At time="0" the controls are already at rest before the
+         fades begin, which is exactly how the OSD behaves on content that has no inset at all.
+         There is no cost to this: the inset only ever changes at playback start or stop, when the
+         OSD is not on screen, so an animated transition can never be seen except as this
+         artefact. -->
+    <include name="Animation_OSD_MatchContent_Slide">
+        <definition>
+            <animation effect="slide" start="0,0" end="0,$PARAM[offset]" time="0" condition="$EXP[Exp_OSD_MatchContent] + String.IsEqual(Window(Home).Property(SkinMod.OSDAspect),$PARAM[aspect])" reversible="true">Conditional</animation>
+        </definition>
+    </include>
+
+    <include name="Animation_OSD_MatchContent_Bottom">
+        <include content="Animation_OSD_MatchContent_Slide"><param name="aspect">1.85</param><param name="offset">-21</param></include>
+        <include content="Animation_OSD_MatchContent_Slide"><param name="aspect">2.00</param><param name="offset">-60</param></include>
+        <include content="Animation_OSD_MatchContent_Slide"><param name="aspect">2.20</param><param name="offset">-104</param></include>
+        <include content="Animation_OSD_MatchContent_Slide"><param name="aspect">2.35</param><param name="offset">-132</param></include>
+        <include content="Animation_OSD_MatchContent_Slide"><param name="aspect">2.40</param><param name="offset">-140</param></include>
+        <include content="Animation_OSD_MatchContent_Slide"><param name="aspect">2.55</param><param name="offset">-164</param></include>
+        <include content="Animation_OSD_MatchContent_Slide"><param name="aspect">2.76</param><param name="offset">-192</param></include>
+    </include>
+
+    <include name="Animation_OSD_MatchContent_Top">
+        <include content="Animation_OSD_MatchContent_Slide"><param name="aspect">1.85</param><param name="offset">21</param></include>
+        <include content="Animation_OSD_MatchContent_Slide"><param name="aspect">2.00</param><param name="offset">60</param></include>
+        <include content="Animation_OSD_MatchContent_Slide"><param name="aspect">2.20</param><param name="offset">104</param></include>
+        <include content="Animation_OSD_MatchContent_Slide"><param name="aspect">2.35</param><param name="offset">132</param></include>
+        <include content="Animation_OSD_MatchContent_Slide"><param name="aspect">2.40</param><param name="offset">140</param></include>
+        <include content="Animation_OSD_MatchContent_Slide"><param name="aspect">2.55</param><param name="offset">164</param></include>
+        <include content="Animation_OSD_MatchContent_Slide"><param name="aspect">2.76</param><param name="offset">192</param></include>
+    </include>
+
     <!-- Fullscreen Window Changes -->
     <include name="Animation_OSD_Fullscreen_Change">
         <animation effect="fade" start="0" end="100" time="300">WindowOpen</animation>
-        <animation effect="fade" end="0" start="100" time="300">WindowClose</animation>
+        <!-- SKINMOD: see the note in VideoOSD.xml. The close fade is skipped once the player has
+             released the file, so teardown on stop is immediate instead of waiting out 300ms of
+             fade over an already-deleted video plane. Used by VideoFullScreen, DialogSeekBar,
+             DialogFullScreenInfo, MusicVisualisation and the OSD_Background_Dim layers - the
+             condition is correct for all of them, since none has anything to fade over once
+             playback has ended. -->
+        <animation effect="fade" end="0" start="100" time="300" condition="Player.HasMedia">WindowClose</animation>
+        <animation effect="fade" end="0" start="0" time="0" condition="!Player.HasMedia">WindowClose</animation>
         <animation effect="fade" start="0" end="100" time="300">VisibleChange</animation>
     </include>
 

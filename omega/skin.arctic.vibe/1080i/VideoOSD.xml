@@ -3,7 +3,16 @@
     <defaultcontrol always="true">6001</defaultcontrol>
     <animation effect="fade" start="0" end="100" time="300" delay="200" condition="Window.IsActive(DialogSeekBar.xml) | Window.IsVisible(1152)">WindowOpen</animation>
     <animation effect="fade" start="0" end="100" time="300" condition="![Window.IsActive(DialogSeekBar.xml) | Window.IsVisible(1152)]">WindowOpen</animation>
-    <animation effect="fade" end="0" start="100" time="300">WindowClose</animation>
+        <!-- SKINMOD: skip the close fade when the player has already released the file.
+             Kodi defers "Window Deinit" until a WindowClose animation finishes, and
+             CRenderManager::DeleteRenderer runs BEFORE any of it - so on stop these fades played
+             out over a dead video plane and the teardown took 233ms against Estuary's 12ms. That
+             gap is what was seen as flashing. Player.HasMedia is false by then, so the windows now
+             close immediately; closing the OSD during playback still fades normally. -->
+    <animation effect="fade" end="0" start="100" time="300" condition="Player.HasMedia">WindowClose</animation>
+    <animation effect="fade" end="0" start="0" time="0" condition="!Player.HasMedia">WindowClose</animation>
+    <!-- SKINMOD: latch the content aspect for "Match OSD to content". See Includes_Animations.xml. -->
+    <onload>SetProperty(SkinMod.OSDAspect,$INFO[VideoPlayer.VideoAspect],Home)</onload>
     <onload>SetProperty(UID,$ESCINFO[Player.Title]$INFO[Player.Time(ss)],1146)</onload>
     <onload>SetProperty(UID,$ESCINFO[Player.Title]$INFO[Player.Time(ss)],1147)</onload>
     <onunload>CancelAlarm(osd_timeout,true)</onunload>
@@ -11,6 +20,7 @@
 
         <control type="group">
             <include>OSD_HideControls</include>
+            <include>Animation_OSD_MatchContent_Bottom</include> <!-- SKINMOD -->
 
             <control type="group">
                 <visible>!Window.IsActive(DialogPlayerProcessInfo.xml)</visible>

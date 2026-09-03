@@ -7,11 +7,19 @@
     <visible>!Window.IsActive(DialogSubtitles.xml)</visible>
     <animation effect="fade" start="0" end="100" time="300" delay="400" condition="Window.IsVisible(videoosd)">WindowOpen</animation>
     <animation effect="fade" start="0" end="100" time="300" condition="!Window.IsVisible(videoosd)">WindowOpen</animation>
-    <animation effect="fade" end="0" start="100" time="300">WindowClose</animation>
+        <!-- SKINMOD: skip the close fade when the player has already released the file.
+             Kodi defers "Window Deinit" until a WindowClose animation finishes, and
+             CRenderManager::DeleteRenderer runs BEFORE any of it - so on stop these fades played
+             out over a dead video plane and the teardown took 233ms against Estuary's 12ms. That
+             gap is what was seen as flashing. Player.HasMedia is false by then, so the windows now
+             close immediately; closing the OSD during playback still fades normally. -->
+    <animation effect="fade" end="0" start="100" time="300" condition="Player.HasMedia">WindowClose</animation>
+    <animation effect="fade" end="0" start="0" time="0" condition="!Player.HasMedia">WindowClose</animation>
     <controls>
 
 
         <control type="group">
+            <include>Animation_OSD_MatchContent_Bottom</include> <!-- SKINMOD -->
             <include content="Animation_ConditionalFade">
                 <param name="condition">![Window.IsActive(VideoFullScreen.xml) | Window.IsActive(MusicVisualisation.xml)]</param>
             </include>

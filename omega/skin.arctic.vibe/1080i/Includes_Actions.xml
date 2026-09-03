@@ -16,6 +16,18 @@
     </variable>
 
     <variable name="Action_DialogInfo_PlayMedia">
+        <!-- SKINMOD: Hand playback to Kodi's native CGUIDialogVideoInfo::Play() for library
+             items, instead of routing a path string through TMDb Helper's PlayMedia. The
+             native handler plays m_movieItem itself, which already carries its full art map,
+             so LoadDetails() returns early and no synthetic default-icon item is ever built.
+             This is what Estuary does and why Estuary never loses artwork.
+             The skin defines no control 8, but SendClick addresses the WINDOW and passes the
+             control id only as sender, so CGUIDialogVideoInfo::OnMessage still dispatches.
+             Guarded to Kodi's own info dialog with a real library item; everything else falls
+             through to the untouched upstream values below.
+             See MOD_CHANGELOG section 28. -->
+        <value condition="Window.IsVisible(movieinformation) + !String.IsEmpty(ListItem.DBID) + !$EXP[Exp_IsFolder]">SendClick(movieinformation,8)</value>
+
         <!-- Play FileNameAndPath -->
         <value condition="!String.IsEmpty(ListItem.FileNameAndPath) + !$EXP[Exp_IsFolder]">RunScript(plugin.video.themoviedb.helper,close_dialog=1190,"playmedia=$INFO[ListItem.FileNameAndPath]")</value>
 
