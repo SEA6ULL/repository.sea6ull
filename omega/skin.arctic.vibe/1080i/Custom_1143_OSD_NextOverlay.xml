@@ -6,7 +6,13 @@
 
         <control type="group">
             <include>OSD_HideControls</include>
-            <include>Animation_OSD_MatchContent_Top</include> <!-- SKINMOD -->
+            <!-- SKINMOD: NO Match-OSD-to-content include at this level.
+                 This window is the ONE mixed-anchor case among the fourteen: the up-next card
+                 below is anchored to the TOP (top=view_pad) while the button row under it is a
+                 replica of the VideoOSD row at centerbottom 80. A single include on this group
+                 pushed the button row the wrong way, so on non-16:9 content it separated from the
+                 real VideoOSD row and both were drawn - reported as a duplicate skip-chapter
+                 button. The two children are therefore insetted independently below. -->
             <control type="list" id="513">
                 <left>-1920</left>
                 <width>1</width>
@@ -17,6 +23,7 @@
             </control>
 
             <control type="group">
+                <include>Animation_OSD_MatchContent_Top</include> <!-- SKINMOD: top-anchored card -->
                 <top>view_pad</top>
                 <left>view_pad</left>
                 <visible>!Container(513).IsUpdating</visible>
@@ -66,6 +73,7 @@
             </control>
 
             <control type="group">
+                <include>Animation_OSD_MatchContent_Bottom</include> <!-- SKINMOD: must match VideoOSD's row -->
                 <left>view_pad</left>
                 <right>view_pad</right>
 

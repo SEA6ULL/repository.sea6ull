@@ -8,7 +8,17 @@
 
         <control type="group">
             <include>OSD_HideControls</include>
-            <include>Animation_OSD_MatchContent_Top</include> <!-- SKINMOD -->
+            <!-- SKINMOD: _Bottom, NOT _Top, despite the <top> below and the window's name.
+                 The <top>view_pad</top> here only establishes a bounding box that runs to the
+                 bottom of the screen. What is actually pinned is the CONTENT's bottom edge: the
+                 inner group is <bottom>240</bottom> and OSD_Progress_Details_Extended is a
+                 grouplist with <bottom>40</bottom> and align=bottom, so the panel's baseline sits
+                 at y=800 and it grows upward from there. That is 140px above the VideoOSD button
+                 row at 940..1060, and the panel has to keep that gap.
+                 Insetting it downward moved the panel to 940 while the button row moved up to 800
+                 - a 140px overlap, which is the collision seen when hovering the Info button.
+                 Judge these by where the content's fixed edge is, not by the outermost <top>. -->
+            <include>Animation_OSD_MatchContent_Bottom</include> <!-- SKINMOD -->
 
             <visible>!Window.IsActive(DialogPlayerProcessInfo.xml)</visible>
             <visible>!Window.IsVisible(DialogSlider.xml)</visible>

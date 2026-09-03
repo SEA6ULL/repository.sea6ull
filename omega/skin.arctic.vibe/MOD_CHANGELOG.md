@@ -1,6 +1,6 @@
 # Arctic Vibe — Mod Changelog
 
-Ships as **Arctic Vibe** (`skin.arctic.vibe`, v1.0.8) by sea6ull.
+Ships as **Arctic Vibe** (`skin.arctic.vibe`, v1.0.9) by sea6ull.
 A modified fork of **Arctic Fuse 2** (`skin.arctic.fuse.2`, v2.12.12) by jurialmunkey.
 
 This document records every change made to the upstream skin, and — where it matters —
@@ -490,7 +490,7 @@ $INFO[System.BuildVersionShort,Kodi ,]$INFO[System.AddonVersion(skin.arctic.vibe
 * `AF2 v` → `AV v`.
 * The version number itself is **not hardcoded** — it is read live from `addon.xml` via
   `System.AddonVersion`, which is why the `version` attribute there is what this line renders —
-  currently `version="1.0.4"`, so it reads "AV v1.0.4". Keep it that way; hardcoding would let the
+  currently `version="1.0.9"`, so it reads "AV v1.0.9". Keep it that way; hardcoding would let the
   two drift apart.
 
 The info label targets the addon id, which is now `skin.arctic.vibe` (see section 10).
@@ -2316,10 +2316,55 @@ Because the whole window root moves as a rigid body, **internal spacing is untou
 are impossible by construction.** The scroll-down panels (cast, playlist, stream selectors) keep
 their existing relationships to each other.
 
+### Direction is decided by the content's pinned edge, not the outermost `<top>`
+
+Two windows were classified wrongly on the first pass, both because the outermost group's `<top>`
+was taken as the anchor.
+
+**`Custom_1153_OSD_VideoInfoOverlayTop`** — named "Top", and its outer group opens with
+`<top>view_pad</top>`, but that only establishes a bounding box running to the bottom of the
+screen. What is actually pinned is the content's *bottom* edge: the inner group is
+`<bottom>240</bottom>`, and `OSD_Progress_Details_Extended` is a grouplist with `<bottom>40</bottom>`
+and `align=bottom`. The panel's baseline therefore sits at y=800 and grows upward, 140px clear of
+the VideoOSD button row at 940..1060.
+
+Insetting it downward pushed the baseline to 940 while the button row moved up to 800 — a 140px
+overlap, which is the collision seen when hovering the Info button in the player. It takes
+`_Bottom`.
+
+```
+_Top    (wrong): content bottom 940, row 800..920  -> OVERLAP 140px
+_Bottom (right): content bottom 660, row 800..920  -> gap 140px
+```
+
+**When adding this to a window, resolve the content's actual pixel position.** A group carrying
+both `<top>` and `<bottom>` is a stretched box, and an outer `<top>` says nothing about which edge
+the content is pinned to. The remaining `_Top` attachments were re-checked for any `bottom`,
+`centerbottom` or `align=bottom` in their subtrees; both are clean.
+
+### Custom_1143 is a mixed-anchor window — the exception to the rule below
+
+The original audit assumed each OSD window is anchored uniformly, top **or** bottom.
+`Custom_1143_OSD_NextOverlay` breaks that: the up-next card is anchored to the top
+(`top=view_pad`) while directly below it sits an `OSD_CustomDialog_GroupList` at `centerbottom 80`
+— a replica of the VideoOSD button row that exists so focus can move between the two windows.
+
+With a single `_Top` include on the window root, that replica moved **down** by the inset while the
+real VideoOSD row moved **up** by it, separating the two rows by twice the offset. Both were drawn,
+which is what surfaced as a duplicate skip-chapter button on 1.85:1 content.
+
+The two children are therefore insetted independently: `_Top` on the card, `_Bottom` on the button
+row. The window root carries no include at all.
+
+**Before adding this to another window, check the window for mixed anchoring first.** All fifteen
+attachment points were re-audited after this was found; `Custom_1143` is the only one. The trap is
+that a replica button row can look like incidental furniture, and that the bug only shows on
+content whose inset is non-zero.
+
 | Direction | Windows |
 |---|---|
-| Bottom | `VideoOSD.xml`, `DialogSeekBar.xml`, `VideoOSDBookmarks.xml`, `DialogPVRChannelsOSD.xml`, `Custom_1140`, `Custom_1141`, `Custom_1145`, `Custom_1146`, `Custom_1147`, `Custom_1148`, `Custom_1152` |
-| Top | `Custom_1143`, `Custom_1153`, `VideoFullScreen.xml` (codec overlay grouplist) |
+| Bottom | `VideoOSD.xml`, `DialogSeekBar.xml`, `VideoOSDBookmarks.xml`, `DialogPVRChannelsOSD.xml`, `Custom_1140`, `Custom_1141`, `Custom_1145`, `Custom_1146`, `Custom_1147`, `Custom_1148`, `Custom_1152`, `Custom_1153`, `Custom_1143` (button row only) |
+| Top | `VideoFullScreen.xml` (codec overlay grouplist), `Custom_1143` (up-next card only) |
 
 Music windows (`Custom_1142`, `Custom_1151`, `MusicVisualisation.xml`) are **untouched**.
 
@@ -2637,6 +2682,63 @@ problem recurs:
 
 ---
 
+## 29. Regression in 1.0.8: two Match-OSD-to-content fixes lost
+
+**Key files:** `1080i/Custom_1143_OSD_NextOverlay.xml`,
+`1080i/Custom_1153_OSD_VideoInfoOverlayTop.xml`
+
+The 1.0.8 package was assembled from a tree that predated the last two fixes of section 26. Both
+files reverted to the **first-pass** classification — a single `Animation_OSD_MatchContent_Top` on
+the window root — and the two subsections of section 26 that document them
+("Direction is decided by the content's pinned edge" and "Custom_1143 is a mixed-anchor window")
+were absent from the 1.0.8 changelog, along with the corrected direction table. Nothing else
+regressed; `Includes_Actions.xml` (section 28) was the only intended change in 1.0.8.
+
+Reverting the code and the documentation together is what made this invisible: the changelog in the
+package described the reverted state as correct, so the two bugs looked like new reports rather than
+returning ones.
+
+### Symptoms as reported
+
+| Symptom | File | Cause |
+|---|---|---|
+| Info panel does not slide up when the OSD is inset | `Custom_1153` | `_Top` moved the panel *down* into the VideoOSD button row instead of up |
+| Duplicate skip-chapter button in the OSD on non-16:9 content | `Custom_1143` | `_Top` on the root moved the replica button row down while the real VideoOSD row moved up, separating the two so both read as distinct |
+
+Both are exactly the failures described in section 26. Restoring the 1.0.7 state of the two files
+fixes them; no new code was written for this release.
+
+### Restored state
+
+* `Custom_1153` — root include is `Animation_OSD_MatchContent_Bottom`. The window is named "Top"
+  and its outer group opens with `<top>view_pad</top>`, but the content is pinned by its *bottom*
+  edge. See section 26.
+* `Custom_1143` — **no include on the window root.** `_Top` on the up-next card,
+  `_Bottom` on the `OSD_CustomDialog_GroupList` button row. This is the only mixed-anchor window of
+  the fifteen attachment points.
+
+Both files carry the full reasoning as `SKINMOD:` block comments at the attachment points, so the
+classification now survives independently of this document.
+
+### Guard against a repeat
+
+The direction of every attachment is checkable from the source without reasoning about geometry:
+
+```
+grep -rn "Animation_OSD_MatchContent" 1080i/
+```
+
+Expect **fifteen** attachments — thirteen `_Bottom`, two `_Top` — matching the direction table in
+section 26. `Custom_1143` must show one of each and none on its root; `Custom_1153` must show
+`_Bottom`. Any release where that grep disagrees with the table has the 1.0.8 regression.
+
+Because the reverted state is well-formed XML that resolves every include, none of the five
+validation steps below could have caught this. **A manifest diff against the previous release is
+now part of packaging**: any file differing from the last version that is not named in that
+release's changelog section is treated as an unintended revert until confirmed.
+
+---
+
 ## Validation performed after every change
 
 1. **XML well-formedness** across all files in `1080i/` (258 files at last count).
@@ -2651,6 +2753,9 @@ problem recurs:
 4. **JSON validity** for all files under `shortcuts/`.
 5. **Zip integrity** plus a file-manifest diff against the original archive to confirm nothing was
    dropped unintentionally (only `.git*` / `.github` CI metadata is excluded from the package).
+6. **Manifest diff against the previous release** — every file that differs must be accounted for by
+   a changelog section in this release. Added in 1.0.9 after the section 29 regression, which was
+   valid XML and therefore passed steps 1-5.
 
 ---
 
