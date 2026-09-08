@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <addons>
-<addon id="plugin.program.sea6ullwiz" name="SEA6ULL Wizard" version="1.0.2" provider-name="SEA6ULL">
+<addon id="plugin.program.sea6ullwiz" name="SEA6ULL Wizard" version="1.0.3" provider-name="SEA6ULL">
 	<requires>
 		<import addon="xbmc.python" version="3.0.1"/>
 		<import addon="script.module.requests"/>
@@ -20,7 +20,17 @@
 		<website></website>
 		<email></email>
 		<source></source>
-		<news>v1.0.2
+		<news>v1.0.3
+- Clear Thumbnails is now Clear Cache Files
+- Pick exactly what to remove from a checklist, with the size of each item shown
+- Now also clears the TMDb Helper caches (blur, crop and database folders)
+- Thumbnails and Textures13.db are cleared together as one item, so artwork never goes blank
+- TMDb Helper caches are detected by name, so future versions are found automatically
+- Notifications, the Log Viewer and Clear Cache Files now use Kodi's own dialogs, so they follow the fonts, colours and layout of your skin
+- Log Viewer now uses a fixed width font and keeps the log's own indentation
+- Backups now leave out the TMDb Helper cache folders, so they are smaller and faster
+
+v1.0.2
 - Backup date and size now show in the item name (skins ignored the second label)
 
 v1.0.1
@@ -80,7 +90,7 @@ v1.0.1
 	</extension>
 </addon>
 
-<addon id="skin.arctic.vibe" name="Arctic Vibe" provider-name="sea6ull" version="1.0.9">
+<addon id="skin.arctic.vibe" name="Arctic Vibe" provider-name="sea6ull" version="1.0.10">
     <requires>
         <import addon="xbmc.gui" version="5.17.0" />
         <import addon="script.skinvariables" version="2.1.28" />

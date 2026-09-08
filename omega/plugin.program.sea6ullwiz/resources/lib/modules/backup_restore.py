@@ -10,6 +10,7 @@ from urllib.parse import quote_plus
 from zipfile import ZipFile
 from pathlib import Path
 from .addonvar import home, addon_profile, addon_path, setting, setting_set, translatePath, xbmcPath, addon_id, dp, local_string, addon_name, addon_icon, addon_fanart
+from .cache_paths import tmdbh_cache_dirs
 from .utils import add_dir
 from .colors import colors
 
@@ -32,7 +33,31 @@ compression = zipfile.ZIP_DEFLATED
 def log(_text, _var):
     xbmc.log(f'{_text} = {str(_var)}', xbmc.LOGINFO)
 
-excludes = [p / 'addons/packages', p / 'addons/temp', p / 'userdata/Thumbnails', p / 'userdata/Database/Textures13.db', p / wizard_path]
+base_excludes = [p / 'addons/packages', p / 'addons/temp', p / 'userdata/Thumbnails', p / 'userdata/Database/Textures13.db', p / wizard_path]
+
+def build_excludes():
+    """Anything Kodi or an add-on rebuilds on its own is left out of a backup.
+    TMDb Helper's cache stores are found by name, so a future blur_v4 or
+    database_08 is skipped automatically without touching this list."""
+    items = list(base_excludes)
+    items += [Path(x) for x in tmdbh_cache_dirs(str(userdata / 'addon_data'),
+                                                logger=lambda m: xbmc.log(m, xbmc.LOGINFO))]
+    return items
+
+def is_excluded(path, exclude_list):
+    """True when path is an excluded item or sits anywhere inside one."""
+    for item in exclude_list:
+        if path == item:
+            return True
+        try:
+            path.relative_to(item)
+            return True
+        except ValueError:
+            pass
+    # Textures13.db leaves -journal / -wal / -shm files next to it.
+    if path.name.startswith('Textures13.db') and path.parent == userdata / 'Database':
+        return True
+    return False
 
 def from_keyboard():
     kb = xbmc.Keyboard('', 'Enter Backup Name', False)
@@ -50,16 +75,18 @@ def backup_build():
     else:
         backup_name = backup_path / f'{k}.zip'
         
-    addons_dirs, addons_files = ([x for x in addons.iterdir() if x.is_dir() and x not in excludes]), ([x for x in addons.iterdir() if x.is_file() and x not in excludes])
+    excludes = build_excludes()
 
-    media_dirs, media_files = ([x for x in media.iterdir() if x.is_dir() and x not in excludes]), ([x for x in media.iterdir() if x.is_file() and x not in excludes])
+    addons_dirs, addons_files = ([x for x in addons.iterdir() if x.is_dir() and not is_excluded(x, excludes)]), ([x for x in addons.iterdir() if x.is_file() and not is_excluded(x, excludes)])
 
-    userdata_dirs, userdata_files = ([x for x in userdata.iterdir() if x.is_dir() and x not in excludes]), ([x for x in userdata.iterdir() if x.is_file() and x not in excludes])
+    media_dirs, media_files = ([x for x in media.iterdir() if x.is_dir() and not is_excluded(x, excludes)]), ([x for x in media.iterdir() if x.is_file() and not is_excluded(x, excludes)])
+
+    userdata_dirs, userdata_files = ([x for x in userdata.iterdir() if x.is_dir() and not is_excluded(x, excludes)]), ([x for x in userdata.iterdir() if x.is_file() and not is_excluded(x, excludes)])
     
     zip_file = ZipFile(backup_name, 'w')
     xbmcgui.Dialog().notification(addon_name, 'Backup in progress, please wait!', addon_icon, 3000)
     for x in sorted(addons_dirs):
-        for z in sorted([y for y in x.rglob('*') if y not in excludes]):
+        for z in sorted([y for y in x.rglob('*') if not is_excluded(y, excludes)]):
             try:
                 if '__pycache__' not in str(z):
                     zip_file.write(z, str(z.relative_to(p)), compress_type=compression)
@@ -72,7 +99,7 @@ def backup_build():
             xbmc.log(f'Unable to compress file {str(x)}: {e}', xbmc.LOGINFO)
     
     for x in sorted(media_dirs):
-        for z in sorted([y for y in x.rglob('*') if y not in excludes]):
+        for z in sorted([y for y in x.rglob('*') if not is_excluded(y, excludes)]):
             try:
                 zip_file.write(z, str(z.relative_to(p)), compress_type=compression)
             except Exception as e:
@@ -84,7 +111,7 @@ def backup_build():
             xbmc.log(f'Unable to compress file {str(x)}: {e}', xbmc.LOGINFO)
 
     for x in sorted(userdata_dirs):
-        for z in sorted([y for y in x.rglob('*') if y not in excludes]):
+        for z in sorted([y for y in x.rglob('*') if not is_excluded(y, excludes)]):
             try:
                 zip_file.write(z, str(z.relative_to(p)), compress_type=compression)
             except Exception as e:

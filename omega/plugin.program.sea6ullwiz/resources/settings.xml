@@ -15,10 +15,8 @@
 	</category>
 	<category label="30059">
 	<setting type="lsep" label="30058"/>
-      <setting id="savedata"  type="bool" label="Save Trakt & Debrid Data" default="true"/>
-      <setting id="saveyoutube" type="bool" label="Save Youtube API Keys" default="false"/>
+      <setting id="saveyoutube" type="bool" label="Save YouTube API Keys (sign-in not saved)" default="false"/>
 	<setting id="savefavs" type="bool" label="Save Favourites" default="false"/>
-	<setting id="saveadvanced" type="bool" label="Save Advanced Settings" default="false"/>	
 	<setting id="savesources" type="bool" label="Save Sources" default="false"/>
     </category>
 </settings>

@@ -1,4 +1,5 @@
 import os
+import re
 import shutil
 import sqlite3
 import xbmc
@@ -7,8 +8,17 @@ import xbmcgui
 from .skinSwitch import swapSkins
 from .save_data import save_backup_restore
 from .utils import log
-from .addonvar import currSkin, user_path, db_path, addon_name, textures_db, advancedsettings_folder_k20, advancedsettings_folder_k21, advancedsettings_xml, dialog, dp, xbmcPath, packages, setting_set, addon_icon, local_string, addons_db
-from .whitelist import EXCLUDES_INSTALL, EXCLUDES_FRESH
+from .cache_paths import tmdbh_cache_dirs
+from .addonvar import currSkin, user_path, db_path, data_path, addon_name, textures_db, dialog, dp, xbmcPath, packages, setting_set, addon_icon, local_string, addons_db, addon_id
+from uservar import excludes
+
+# Folders and files a wipe must leave alone. Matched by name anywhere under the
+# Kodi path. EXCLUDES_INSTALL applies when fresh_start runs as part of a build
+# install; EXCLUDES_FRESH applies to the standalone Fresh Start menu item.
+EXCLUDES_FRESH = [addon_id, 'Addons33.db', 'kodi.log', 'script.module.certifi',
+                  'script.module.chardet', 'script.module.idna',
+                  'script.module.requests', 'script.module.urllib3', 'repository.709']
+EXCLUDES_INSTALL = excludes + [addon_id, 'Addons33.db', 'packages', 'backups', 'repository.709']
 
 def purge_db(db):
     if os.path.exists(db):
@@ -35,68 +45,150 @@ def purge_db(db):
     conn.close()
     xbmc.log('%s DB Purging Complete.' % db, xbmc.LOGINFO)
 
-def clear_thumbnails():
+####----- Clear Cache Files -----####
+
+def human_size(num):
+    for unit in ('B', 'KB', 'MB', 'GB'):
+        if num < 1024 or unit == 'GB':
+            return '%d %s' % (num, unit) if unit == 'B' else '%.1f %s' % (num, unit)
+        num /= 1024.0
+
+
+def path_size(path):
+    if os.path.isfile(path):
+        try:
+            return os.path.getsize(path)
+        except OSError:
+            return 0
+    total = 0
+    for root, dirs, files in os.walk(path):
+        for name in files:
+            try:
+                total += os.path.getsize(os.path.join(root, name))
+            except OSError:
+                pass
+    return total
+
+
+def find_cache_targets():
+    """Build the list of cache entries that currently exist on this device.
+    An entry can cover more than one path when they only make sense together."""
+    targets = []
+
+    # Thumbnails and Textures13.db are two halves of the same cache: the folder
+    # holds the images, the database indexes them. Clearing one without the
+    # other leaves Kodi showing blank artwork, so they are offered as one item.
+    thumbnails = os.path.join(user_path, 'Thumbnails')
+    thumb_paths = []
+    if os.path.isdir(thumbnails):
+        thumb_paths.append({'path': thumbnails, 'db': False})
+    if os.path.exists(textures_db):
+        thumb_paths.append({'path': textures_db, 'db': True})
+    if thumb_paths:
+        targets.append({'name': 'Thumbnails', 'paths': thumb_paths})
+
+    for full_path in tmdbh_cache_dirs(data_path, logger=lambda m: xbmc.log(m, xbmc.LOGINFO)):
+        targets.append({'name': 'TMDb Helper: %s' % os.path.basename(full_path),
+                        'paths': [{'path': full_path, 'db': False}]})
+    return targets
+
+
+def target_size(target):
+    return sum(path_size(item['path']) for item in target['paths'])
+
+
+def wipe_path(item):
+    """Empty a single cache location. Folders are kept in place so the owning
+    add-on does not have to recreate them. True when nothing is left behind."""
+    path = item['path']
+    if not os.path.exists(path):
+        return True
+    if os.path.isdir(path):
+        shutil.rmtree(path, ignore_errors=True)
+        if not os.path.exists(path):
+            try:
+                os.makedirs(path)
+            except OSError as e:
+                xbmc.log('Unable to recreate %s. Reason: %s' % (path, e), xbmc.LOGINFO)
+        try:
+            return not os.listdir(path)
+        except OSError:
+            return False
     try:
-        if os.path.exists(os.path.join(user_path, 'Thumbnails')):
-            shutil.rmtree(os.path.join(user_path, 'Thumbnails'))
+        os.unlink(path)
+        return True
     except Exception as e:
-            xbmc.log('Failed to delete %s. Reason: %s' % (os.path.join(user_path, 'Thumbnails'), e), xbmc.LOGINFO)
-            return
+        xbmc.log('Failed to delete %s. Reason: %s' % (path, e), xbmc.LOGINFO)
+        if item['db']:
+            # File is locked (Kodi has it open), so empty the tables instead.
+            purge_db(path)
+            return True
+        return False
+
+
+def wipe_target(target):
+    """Clear every path belonging to one checklist entry."""
+    results = [wipe_path(item) for item in target['paths']]
+    return all(results)
+
+
+def clear_cache_files():
+    # Finding the entries is cheap, but measuring them means walking every file,
+    # which is slow on a big Thumbnails folder. Show real progress while sizing.
+    targets = find_cache_targets()
+    if not targets:
+        dialog.ok(addon_name, local_string(30107))  # Nothing found to clear
+        return
+
+    dp.create(addon_name, local_string(30113))  # Scanning for cache files...
     try:
-        if os.path.exists(os.path.join(db_path, 'Textures13.db')):
-            os.unlink(os.path.join(db_path, 'Textures13.db'))
-    except:
-        purge_db(textures_db)
-    xbmc.sleep(1000)
-    xbmcgui.Dialog().ok(addon_name, local_string(30037))  # Thumbnails Deleted
+        for count, target in enumerate(targets):
+            if dp.iscanceled():
+                return
+            dp.update(int(count * 100 / len(targets)), '%s[CR]%s' % (local_string(30113), target['name']))
+            target['size'] = target_size(target)
+        dp.update(100, local_string(30113))
+    finally:
+        dp.close()
 
-def advanced_settings_k20():
-    selection = xbmcgui.Dialog().select(local_string(30038), ['1GB Devices (E.g. 1st-3rd gen Firestick/Firestick Lite)','1.5GB Devices (E.g. 4k Firestick)','2GB+ Devices (E.g. Shield Pro/Shield Tube/FireTV Cube)','Default (Reset to Default)',local_string(30039)])  # Select Ram Size, Delete
-    if selection==0:
-        xml = os.path.join(advancedsettings_folder_k20, '1_gb.xml')
-    elif selection==1:
-        xml = os.path.join(advancedsettings_folder_k20, '1_5gb.xml')
-    elif selection==2:
-        xml = os.path.join(advancedsettings_folder_k20, '2_gb.xml')
-    elif selection==3:
-        xml = os.path.join(advancedsettings_folder_k20, 'default.xml')
-        if os.path.exists(advancedsettings_xml):
-            os.unlink(advancedsettings_xml)
-        xbmc.sleep(1000)
-        dialog.ok(addon_name, local_string(30040))  # Advanced Settings Deleted
-        os._exit(1)
-    else:
+    # Kodi's own multiselect is used rather than a bundled window, so the
+    # checklist is drawn by the active skin and matches the rest of Kodi.
+    # The size travels in the label because a compact select list is the only
+    # layout every skin is guaranteed to have.
+    labels = ['%s  [%s]' % (t['name'], human_size(t['size'])) for t in targets]
+    selection = dialog.multiselect(local_string(30108), labels,
+                                   preselect=list(range(len(targets))))
+    if not selection:
         return
-    if os.path.exists(advancedsettings_xml):
-        os.unlink(advancedsettings_xml)
-    shutil.copyfile(xml, advancedsettings_xml)
-    xbmc.sleep(1000)
-    dialog.ok(addon_name, local_string(30041))  # Advanced Settings Set
+
+    chosen = [targets[i] for i in selection]
+    total_size = sum(t['size'] for t in chosen)
+    warning = local_string(30109) % human_size(total_size)  # Are you sure?
+    if not dialog.yesno(addon_name, warning, nolabel=local_string(30032), yeslabel=local_string(30110)):  # No, Delete
+        return
+
+    dp.create(addon_name, local_string(30111))  # Deleting cache files...
+    cleared = 0
+    freed = 0
+    for count, target in enumerate(chosen):
+        if dp.iscanceled():
+            break
+        dp.update(int(count * 100 / len(chosen)), '%s[CR]%s' % (local_string(30111), target['name']))
+        if wipe_target(target):
+            cleared += 1
+            freed += target['size']
+    dp.update(100, local_string(30111))
+    xbmc.sleep(500)
+    dp.close()
+    if not cleared:
+        dialog.ok(addon_name, local_string(30118))  # Nothing could be deleted
+        return
+    dialog.ok(addon_name, local_string(30112) % (cleared, len(chosen), human_size(freed)))  # Cleared x of y
     os._exit(1)
 
-def advanced_settings_k21():
-    selection = xbmcgui.Dialog().select(local_string(30038), ['1GB Devices (E.g. 1st-3rd gen Firestick/Firestick Lite)','1.5GB Devices (E.g. 4k Firestick)','2GB+ Devices (E.g. Shield Pro/Shield Tube/FireTV Cube)','Default (Reset to Default)',local_string(30039)])  # Select Ram Size, Delete
-    if selection==0:
-        xml = os.path.join(advancedsettings_folder_k21, '1_gb.xml')
-    elif selection==1:
-        xml = os.path.join(advancedsettings_folder_k21, '1_5gb.xml')
-    elif selection==2:
-        xml = os.path.join(advancedsettings_folder_k21, '2_gb.xml')
-    elif selection==3:
-        xml = os.path.join(advancedsettings_folder_k21, 'default.xml')
-        if os.path.exists(advancedsettings_xml):
-            os.unlink(advancedsettings_xml)
-        xbmc.sleep(1000)
-        dialog.ok(addon_name, local_string(30040))  # Advanced Settings Deleted
-        os._exit(1)
-    else:
-        return
-    if os.path.exists(advancedsettings_xml):
-        os.unlink(advancedsettings_xml)
-    shutil.copyfile(xml, advancedsettings_xml)
-    xbmc.sleep(1000)
-    dialog.ok(addon_name, local_string(30041))  # Advanced Settings Set
-    os._exit(1)
+
+# Kept so any older menu item or shortcut pointing at the previous name still works.
+clear_thumbnails = clear_cache_files
 
 def fresh_start(standalone=False):
     if standalone:

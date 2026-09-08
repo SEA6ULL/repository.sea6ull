@@ -52,7 +52,7 @@ msgid "Clear all data. Warning, this cannot be undone."
 msgstr ""
 
 msgctxt "#30008"
-msgid "Delete the Thumbnails folder and Textures13 database file. You should only delete these if you want to free up space. Reboot Kodi for thumbnails to repopulate."
+msgid "Delete Kodi's thumbnail cache and the cache folders left behind by TMDb Helper. Pick which ones to clear. Only do this if you need to free up space. Reboot Kodi afterwards."
 msgstr ""
 
 msgctxt "#30009"
@@ -116,7 +116,7 @@ msgid "Clear Packages"
 msgstr ""
 
 msgctxt "#30024"
-msgid "Clear Thumbnails"
+msgid "Clear Cache Files"
 msgstr ""
 
 msgctxt "#30025"
@@ -403,4 +403,54 @@ msgstr ""
 
 msgctxt "#30106"
 msgid "Video Cache Presets K21"
+msgstr ""
+
+#####----- Clear Cache Files -----#####
+
+msgctxt "#30107"
+msgid "No cache files were found on this device."
+msgstr ""
+
+msgctxt "#30108"
+msgid "Select the cache files to delete"
+msgstr ""
+
+msgctxt "#30109"
+msgid "Are you sure?[CR][CR]This will free up about %s, but only do this if your device needs the space. Everything here is rebuilt automatically as you browse, so Kodi will feel slower until the caches fill back up.[CR][CR]This cannot be undone."
+msgstr ""
+
+msgctxt "#30110"
+msgid "Delete"
+msgstr ""
+
+msgctxt "#30111"
+msgid "Deleting cache files..."
+msgstr ""
+
+msgctxt "#30112"
+msgid "Cleared %s of %s items and freed %s.[CR][CR]Force closing Kodi to finish."
+msgstr ""
+
+msgctxt "#30113"
+msgid "Scanning for cache files..."
+msgstr ""
+
+msgctxt "#30114"
+msgid "%s of %s selected  -  frees about %s"
+msgstr ""
+
+msgctxt "#30115"
+msgid "OK"
+msgstr ""
+
+msgctxt "#30116"
+msgid "Cancel"
+msgstr ""
+
+msgctxt "#30117"
+msgid "Press OK on a row to tick or untick it"
+msgstr ""
+
+msgctxt "#30118"
+msgid "Nothing could be deleted. The files may be in use or protected."
 msgstr ""

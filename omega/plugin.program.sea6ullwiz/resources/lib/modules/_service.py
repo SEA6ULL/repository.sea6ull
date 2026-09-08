@@ -111,7 +111,7 @@ class Startup:
         
     def save_menu(self):
         save_items = []
-        choices = ["Trakt & Debrid", "YouTube API Keys", "Favourites", "Advanced Settings", "Sources"]
+        choices = ["YouTube API Keys", "Favourites", "Sources"]
         save_select = dialog.multiselect(addon_name + ' - ' + local_string(30052),choices, preselect=[])  # Select Save Items
         if save_select == None:
             return
@@ -119,11 +119,6 @@ class Startup:
             for index in save_select:
                 save_items.append(choices[index])
                 
-        if 'Trakt & Debrid' in save_items:
-            setting_set('savedata','true')
-        else:
-            setting_set('savedata','false')
-            
         if 'YouTube API Keys' in save_items:
             setting_set('saveyoutube','true')
         else:
@@ -134,11 +129,6 @@ class Startup:
         else:
             setting_set('savefavs','false')
             
-        if 'Advanced Settings' in save_items:
-            setting_set('saveadvanced','true')
-        else:
-            setting_set('saveadvanced','false')
-        
         if 'Sources' in save_items:
             setting_set('savesources', 'true')
         else:
@@ -161,17 +151,13 @@ class Startup:
         self.seren_check()
         if setting('firstrun') == 'true':
             if current_build == 'Xlite Switch':
-                from .save_data import backup_gui_skin
                 xbmc.executebuiltin('UpdateAddonRepos')
                 xbmc.sleep(2000)
                 xbmc.executebuiltin('UpdateLocalAddons')
-                backup_gui_skin()
                 setting_set('firstrun', 'false')
             else:
                 from resources.lib.modules.addons_enable import enable_addons
-                from .save_data import backup_gui_skin
                 enable_addons()
-                backup_gui_skin()
                 setting_set('firstrun', 'false')
         else:
             if setting('autoclearpackages')=='true':

@@ -1,6 +1,6 @@
 # Arctic Vibe — Mod Changelog
 
-Ships as **Arctic Vibe** (`skin.arctic.vibe`, v1.0.9) by sea6ull.
+Ships as **Arctic Vibe** (`skin.arctic.vibe`, v1.0.10) by sea6ull.
 A modified fork of **Arctic Fuse 2** (`skin.arctic.fuse.2`, v2.12.12) by jurialmunkey.
 
 This document records every change made to the upstream skin, and — where it matters —
@@ -490,7 +490,7 @@ $INFO[System.BuildVersionShort,Kodi ,]$INFO[System.AddonVersion(skin.arctic.vibe
 * `AF2 v` → `AV v`.
 * The version number itself is **not hardcoded** — it is read live from `addon.xml` via
   `System.AddonVersion`, which is why the `version` attribute there is what this line renders —
-  currently `version="1.0.9"`, so it reads "AV v1.0.9". Keep it that way; hardcoding would let the
+  currently `version="1.0.10"`, so it reads "AV v1.0.10". Keep it that way; hardcoding would let the
   two drift apart.
 
 The info label targets the addon id, which is now `skin.arctic.vibe` (see section 10).
@@ -2739,6 +2739,110 @@ release's changelog section is treated as an unintended revert until confirmed.
 
 ---
 
+## 30. Fanart edge fade: Simple background style loses its right and top diffuse fade
+
+**Key files:** `media/Textures.xbt` (rebuilt), `1080i/Includes_Background.xml` (reference only — not edited)
+
+`media/Textures.xbt` was rebuilt with the `flixart.png` diffuse mask from **Arctic Fuse 3**
+(`media/diffuse/flixart/flixart.png` in that skin) substituted in. That mask fades only on the
+**left and bottom** edges; the upstream mask faded on all four.
+
+**No XML changed in this release.** The skin already names the texture it needs; only the bytes
+behind that name are different.
+
+### What actually changed inside the bundle
+
+The bundle is `XBTF2`, 1316 entries, and the entry list is identical before and after. Comparing
+packed payloads entry by entry, **exactly one differs**:
+
+| Entry | Size | Format | Old packed | New packed |
+|---|---|---|---|---|
+| `diffuse/flixart/flixart_new.png` | 1280x720 | `A8R8G8B8` | 149,377 | 198,077 |
+
+`diffuse/flixart/flixart.png`, `flixart_flipped.png`, `flixart_invert.png` and
+`background/combined_flixart.png` are **byte-identical** to 1.0.9.
+
+### Name trap — the AF3 file is `flixart.png`, the slot it fills is `flixart_new.png`
+
+This is the one thing to get right when rebuilding the bundle. The source file in Arctic Fuse 3 is
+called `flixart.png`, but in this skin it must be packed under the name **`flixart_new.png`**,
+because that is the name the Simple branch asks for (`Includes_Background.xml:77`). Packing it as
+`flixart.png` instead would hit the *other* branch and leave Simple untouched — the exact opposite
+of the intended change, and silent, because both names exist in the bundle and both resolve.
+
+### Which background style this affects
+
+`Background_Artwork` (`1080i/Includes_Background.xml`) has three mutually exclusive branches, and
+the diffuse mask is what distinguishes the first two:
+
+| Condition | Include | Diffuse mask |
+|---|---|---|
+| `TMDbHelper.EnableBlur` + **not** `Background.ArtworkStyle=Simple` | `Background_FlixArt` | `flixart.png` (include default) |
+| `Background.ArtworkStyle=Simple` | `Background_FlixArt` | **`flixart_new.png`** ← changed here |
+| **not** `EnableBlur` + **not** `Simple` | `Background_Fanart` | none |
+
+So this release changes the fanart edge treatment of the **Simple** artwork style only. The blurred
+style and the plain-fanart style render exactly as they did in 1.0.9.
+
+### Measured before and after
+
+Fade depth = distance in from each edge before the mask reaches 95% opacity, measured on the
+decoded alpha channel:
+
+| Edge | Old mask | New mask |
+|---|---|---|
+| Left | 269px (21% of width) | 271px (21%) — unchanged |
+| Bottom | 272px (38% of height) | 268px (37%) — unchanged |
+| **Right** | 94px (7%) | **0px — opaque to the edge** |
+| **Top** | 97px (14%) | **0px — opaque to the edge** |
+
+Corner alpha went `TL 0% / TR 15% / BL 0% / BR 0%` → `TL 1% / TR 100% / BL 0% / BR 0%`.
+
+### Why dropping the right and top fade is the right call
+
+`Background_FlixArt` pins the panel with `<right>0</right>` and `<top>0</top>` — it is anchored to
+the **top-right corner of the screen**. The right and top edges of the mask therefore sat on the
+screen edges, where there is no UI to blend into. All that fade did was pull a dark rim in from two
+screen edges. The left and bottom edges are the ones that face the menu and the widget rows, and
+those fades are kept at their original depths.
+
+### The new mask is the mask the blur path already used
+
+The substituted mask is the same shape as the `flixart.png` already in the bundle, just at a
+different resolution (1280x720 vs 1232x693). Rescaled to a common size, the two alpha channels agree
+to within **2/255 at every pixel**. The two styles were previously feathered differently for no
+documented reason; they now match.
+
+**The resolution difference is immaterial**, and this is worth knowing before anyone "fixes" it:
+`Background_FlixArt` sets `scalediffuse="false"`, so the mask is mapped to the control rectangle
+(`flixart_size_w` x `flixart_size_h` = 1689x950) rather than being drawn at its native size. Both
+masks stretch to the same panel; neither is used at 1:1.
+
+### Left deliberately in place
+
+* `flixart.png` (1232x693) — still the include default, still used by the blur path. Not replaced
+  with the 1280x720 version, because that would be a no-op at best (identical mask, see above) and
+  would touch the default path for no visual gain.
+* `flixart_flipped.png` / `flixart_invert.png` — `flixart_invert.png` is consumed at
+  `Includes_Background.xml:216` as a black `colordiffuse` layer; `flixart_flipped.png` has no
+  reference in the tree. Both left as-is.
+* The alpha coverage table in **section 24** measures `background/combined_flixart.png` +
+  `combined_overlay.png`, which are different textures and are unchanged. That table and the
+  reasoning built on it still hold.
+
+### Verifying a future rebuild
+
+The bundle is opaque to `grep`, so check it by parsing. A rebuild is correct when:
+
+* the entry list still has **1316** names and none were added or dropped;
+* `diffuse/flixart/flixart_new.png` is the **only** entry whose payload changed;
+* that entry's alpha reaches full opacity at the right and top edges, and still fades ~21% in from
+  the left and ~37% up from the bottom.
+
+Any rebuild that also changes `flixart.png` has substituted the mask under the wrong name.
+
+---
+
 ## Validation performed after every change
 
 1. **XML well-formedness** across all files in `1080i/` (258 files at last count).
@@ -2767,6 +2871,7 @@ release's changelog section is treated as an unintended revert until confirmed.
 | Combine Widgets un-shift | `Hub_Slide_Widgets_OnCombined` (`time` param) | `-hub_widgets_shift_y`, instant |
 | Row view vertical position | `view_row_shifted`, `view_row_hitrect_y_shifted` | 650 / 726 |
 | Fanart panel size | `flixart_size_w` / `_h` (base = Medium) | 1689 x 950 |
+| Fanart edge fade | diffuse masks in `media/Textures.xbt`: `flixart.png` (blur path), `flixart_new.png` (Simple) — see 30 | left + bottom only |
 | Wall grid vertical position | `wall_top` / `wall_bottom` (horizontal: do not set) | 0 / 0 |
 | Wall row pitch | `view_poster_itemlayout_h` — shared, moves row views too | 350 |
 | Default widget view | `widgets_row.xml` fallback rule | `List_Poster_Row` |
