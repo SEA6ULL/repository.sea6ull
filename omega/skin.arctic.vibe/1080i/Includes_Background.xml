@@ -72,9 +72,13 @@
             <include content="Background_FlixArt" condition="Skin.HasSetting(TMDbHelper.EnableBlur) + !Skin.String(Background.ArtworkStyle,Simple)">
                 <param name="fadetime">$PARAM[fadetime]</param>
             </include>
+            <!-- SKINMOD: the diffuse override that used to sit here
+                 (<param name="diffuse">diffuse/flixart/flixart_new.png</param>) is deliberately
+                 gone, so this call inherits Background_FlixArt's default mask, flixart.png.
+                 Simple and Blur now resolve to the SAME diffuse and cannot drift apart again.
+                 Do not re-add a diffuse param here. MOD_CHANGELOG 31. -->
             <include content="Background_FlixArt" condition="Skin.String(Background.ArtworkStyle,Simple)">
                 <param name="fadetime">$PARAM[fadetime]</param>
-                <param name="diffuse">diffuse/flixart/flixart_new.png</param>
             </include>
             <include content="Background_Fanart" condition="!Skin.HasSetting(TMDbHelper.EnableBlur) + !Skin.String(Background.ArtworkStyle,Simple)">
                 <param name="fadetime">$PARAM[fadetime]</param>

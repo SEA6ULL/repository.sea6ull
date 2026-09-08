@@ -1,6 +1,6 @@
 # Arctic Vibe — Mod Changelog
 
-Ships as **Arctic Vibe** (`skin.arctic.vibe`, v1.0.10) by sea6ull.
+Ships as **Arctic Vibe** (`skin.arctic.vibe`, v1.0.14) by sea6ull.
 A modified fork of **Arctic Fuse 2** (`skin.arctic.fuse.2`, v2.12.12) by jurialmunkey.
 
 This document records every change made to the upstream skin, and — where it matters —
@@ -490,7 +490,7 @@ $INFO[System.BuildVersionShort,Kodi ,]$INFO[System.AddonVersion(skin.arctic.vibe
 * `AF2 v` → `AV v`.
 * The version number itself is **not hardcoded** — it is read live from `addon.xml` via
   `System.AddonVersion`, which is why the `version` attribute there is what this line renders —
-  currently `version="1.0.10"`, so it reads "AV v1.0.10". Keep it that way; hardcoding would let the
+  currently `version="1.0.14"`, so it reads "AV v1.0.14". Keep it that way; hardcoding would let the
   two drift apart.
 
 The info label targets the addon id, which is now `skin.arctic.vibe` (see section 10).
@@ -2843,6 +2843,188 @@ Any rebuild that also changes `flixart.png` has substituted the mask under the w
 
 ---
 
+## 31. One fanart diffuse for every style (31b was a misdiagnosis, reverted in 1.0.12)
+
+**Key files:** `1080i/Includes_Background.xml`, `1080i/Includes_Home.xml`
+
+31a is a hygiene change to the fanart diffuse and shipped in 1.0.11. 31b was an attempted fix for
+the reported top-bar dimming; it was based on a wrong reading of the skin, did not work, and was
+reverted in 1.0.12. The real cause and fix are in section 32.
+
+### 31a. The Simple diffuse override is gone
+
+`Background_Artwork`'s Simple branch carried
+`<param name="diffuse">diffuse/flixart/flixart_new.png</param>`, overriding
+`Background_FlixArt`'s default of `flixart.png` (see section 30 for the split). That override is
+removed, so **both branches now resolve to `flixart.png`** and cannot drift apart again.
+
+This is a no-op visually and was done for hygiene, not appearance: after section 30 the two
+textures are the same mask, agreeing to within 2/255 at every pixel. Anyone diffing releases
+looking for the top-bar fix will not find it here — see section 32.
+
+`diffuse/flixart/flixart.png` is now the **only** flixart diffuse the skin can reach through
+`Background_FlixArt`. Two entries in the bundle are no longer referenced by any code path:
+
+| Bundle entry | Status |
+|---|---|
+| `diffuse/flixart/flixart_new.png` | now unreferenced — identical mask to `flixart.png` |
+| `diffuse/flixart/flixart_flipped.png` | unreferenced in 1.0.9 too; mirror image, fades **right** 21% + bottom 39% |
+
+Both are left in `media/Textures.xbt` as inert data. Repacking would need TexturePacker and buys
+nothing. `flixart_flipped.png` is the only right-fading mask left in the bundle and **nothing
+reaches it** — if a right-side fade is ever reported again, it is not this file.
+
+`diffuse/flixart/flixart_invert.png` is **still live** at `Includes_Background.xml:220` and must
+stay. It is the complement mask (opaque left/bottom, clear right/top) drawn as a black fill inside
+`Background_Video`, and has nothing to do with the artwork panel's edge fade.
+
+### 31b. FAILED APPROACH — `Background.ShowOverlay` on the Ribbon menu. Reverted in 1.0.12.
+
+**This subsection describes a change that was shipped in 1.0.11, did not fix the reported symptom,
+and was reverted. `1080i/Includes_Home.xml` is byte-identical to 1.0.9 again. It is kept here so the
+reasoning is not repeated.**
+
+The report was "the fanart dims when I move along the top bar". The layer blamed was
+`background/combined_overlay.png`, drawn by `Background_Main_Overlay` under
+`$EXP[Exp_BackgroundArtwork_IsOverlay]`, which contains a
+`Window(Home).Property(Background.ShowOverlay)` term. `Includes_Home.xml` set that property
+`onfocus` at three sites when `Exp_HomeMenu_IsExpanded + Skin.String(Home.MenuStyle,Ribbon)`, so
+those three sites were changed to an unconditional `ClearProperty`.
+
+**Why it was wrong: "Ribbon" is not a top bar.** `Home_Menu` has exactly one layout variant,
+`Home_Menu_Vert`, and `Includes_Constants_HomeStyle_Ribbon.xml` only sets
+`view_menu_mini` / `view_menu_comp` / `*_pad_x` / `*_offset_x`. Ribbon is a **restyle of the
+left-hand vertical side menu**, not a horizontal one. The `Home.MenuStyle` values are `Ribbon`,
+`Dialog`, and unset. Nothing in the home menu is at the top of the screen.
+
+The genuine top bar is the **hub category row**, and it *clears* both `Background.ShowOverlay` and
+`Background.HideArtwork` on focus (`Includes_Hubs.xml:510`, and `:84` for the submenu row). The
+overlay path was therefore never involved. See section 32 for the real cause.
+
+**Two things that should have caught this earlier.** The overlay's own measurements were right there
+and did not match the report: `combined_overlay.png` is weighted to the **right** (60-67 added
+points at x=80-97%, only 17-25 at x=3-20%), while the symptom was reported at the top-**left**.
+And no attempt was made to confirm which control the words "top bar" referred to before editing.
+A left-weighted symptom needs a left-weighted layer.
+
+---
+
+## 32. Hub category row no longer dims the artwork
+
+**Key file:** `1080i/Includes_Hubs.xml`
+
+`Hub_Top_Bezier` is the dimming layer: an image pinned to the top of the hub, full width and
+**50% of screen height**, drawing `shadows/cornerspot.png` at `colordiffuse="main_bg_70"`
+(`b3000000` — black at 179/255). `flipx="true"` mirrors the texture, so the dim is heaviest at the
+**top-left**.
+
+The fix is the removal of its **single call site** in `Hub_Controls`. The definition is left in its
+original upstream form; one commented line restores it.
+
+### Measured
+
+Effective dim after the flip, the stretch to 1920x540, and `main_bg_70`:
+
+| screen Y | x=3% | x=20% | x=40% | x=60% | x=80% | x=97% |
+|---|---|---|---|---|---|---|
+| **1%** | **69%** | 64 | 52 | 39 | 32 | 15 |
+| **12%** | 64 | 47 | 26 | 14 | 10 | 4 |
+| **28%** | 36 | 13 | 3 | 1 | 1 | 0 |
+| **42%** | 7 | 1 | 0 | 0 | 0 | 0 |
+| **49%** | 2 | 0 | 0 | 0 | 0 | 0 |
+
+Heaviest top-left, gone below about 45% of screen height.
+
+### Why gating the animation does not work — FAILED APPROACH, shipped in 1.0.12
+
+The gradient fades in on `Hub_Top_Animation`'s default condition:
+
+```xml
+<expression name="Exp_HubName_IsVisible">[[Integer.IsEqual(Window.Property(TMDbHelper.WidgetContainer),301) + !Integer.IsEqual(Container(300).NumItems,0) + Control.IsVisible(300)] | $EXP[Exp_HomeMenu_HasFocus]]</expression>
+```
+
+1.0.12 passed an explicit `condition` of `$EXP[Exp_HomeMenu_HasFocus]`, on the theory that the first
+term was the category row and the second was a separate side menu worth keeping. **Both terms are
+true for the same reason, so this changed nothing at all.**
+
+```xml
+<expression name="Exp_HomeMenu_HasFocus">[Control.HasFocus(300) | Control.HasFocus(306) | Control.HasFocus(307) | Control.HasFocus(308) | Control.HasFocus(309) | Control.HasFocus(331)]</expression>
+```
+
+**Control 300 *is* the home menu list** (`Home_Menu_List`, `<param name="id">300</param>`,
+`Includes_Home.xml:56`), and it is the same container `Hub_Categories` lays out **horizontally** as
+the top bar. 306-309 and 331 are the hidden focus-routing buttons that sit alongside it. So "the
+home menu has focus" and "the top bar has focus" are the same statement on this screen, and there is
+no state in which this gradient draws that is not top-bar focus.
+
+**Consequence for future edits:** any attempt to keep this gradient "for the menu but not the top
+bar" is incoherent. It is one control, focused one way. The only ways to change it are to remove the
+call site or to weaken `colordiffuse`.
+
+### Fix
+
+The one call site in `Hub_Controls`, formerly:
+
+```xml
+<include condition="![$PARAM[widgets_only]]">Hub_Top_Bezier</include>
+```
+
+is commented out, with the reasoning recorded at the site. The `Hub_Top_Bezier` definition is
+restored to its original upstream form (bare `<include>Hub_Top_Animation</include>`,
+`main_bg_70`) and carries a comment saying not to edit it — so restoring the gradient is
+uncommenting one line, and a lighter dim is `main_bg_30` (`4d000000`, ~30% of the table above) or
+`main_bg_12` (`1f000000`, ~12%) in the definition.
+
+### How it was actually found
+
+Three wrong diagnoses preceded this (sections 31b, and the 1.0.12 attempt above). What settled it
+was a **temporary debug build**, in the manner of section 28's diagnostic note: each candidate
+layer was given a distinct opaque `colordiffuse` — `Hub_Top_Bezier` red,
+`background/combined_overlay.png` green, `background/combined_flixart.png` blue,
+`background/combined_sidemenu.png` magenta, the home-menu mask yellow — plus an on-screen label
+block reading the live state, since Kodi never writes control text to `kodi.log`.
+
+One screenshot resolved everything: the top-left wash came back **red**, no green appeared
+anywhere, `Background.ShowOverlay` was empty and `Exp_BackgroundArtwork_IsOverlay` was `no`
+(so section 31b's layer never draws on this screen), `Home.MenuStyle` was empty (not `Ribbon`),
+and `Exp_HomeMenu_HasFocus=YES` with `Container300=FOCUS` — which is what exposed the 1.0.12 no-op.
+
+**This technique is cheap and should be reached for sooner.** Three releases were spent reasoning
+about which layer *ought* to be responsible when tinting them and reading one screenshot would have
+identified it immediately. The probe also printed `System.AddonVersion`, which is what ruled out the
+competing explanation that the build was not loading at all.
+
+### Scope
+
+* `Hub_Categories` (`:686`) keeps its own bare `Hub_Top_Animation`, so the row's fade-in timing is
+  untouched. Only the backdrop behind it is gone.
+* `Hub_Top_Animation`, `Hub_Top_Animation_Invert` and the `details_include` use at `:497` are
+  untouched.
+* `Hub_Left_Bezier` (the side gradient, `combined_sidemenu.png`) is untouched.
+* `Background_Main_Overlay`, `combined_overlay.png`, `combined_flixart.png` and all nine
+  `SetProperty(Background.ShowOverlay,...)` sites are untouched.
+* `widgets_only` hubs never drew this gradient anyway, so hubs with `DisableSubmenu` set are
+  unaffected.
+
+The gradient existed to keep the category labels legible over bright artwork, so those labels now
+sit on undimmed fanart.
+
+### Verifying
+
+```
+grep -n "Hub_Top_Bezier" 1080i/Includes_Hubs.xml
+```
+
+Expect the `<include name="Hub_Top_Bezier">` definition and **no live call site** — the only other
+occurrences are inside the `SKINMOD:` comment block in `Hub_Controls`. A parse-level check is
+stronger, since the disabled call site is a comment:
+
+```python
+# no <include content="Hub_Top_Bezier"> or <include>Hub_Top_Bezier</include> element may exist
+```
+
+---
+
 ## Validation performed after every change
 
 1. **XML well-formedness** across all files in `1080i/` (258 files at last count).
@@ -2871,7 +3053,9 @@ Any rebuild that also changes `flixart.png` has substituted the mask under the w
 | Combine Widgets un-shift | `Hub_Slide_Widgets_OnCombined` (`time` param) | `-hub_widgets_shift_y`, instant |
 | Row view vertical position | `view_row_shifted`, `view_row_hitrect_y_shifted` | 650 / 726 |
 | Fanart panel size | `flixart_size_w` / `_h` (base = Medium) | 1689 x 950 |
-| Fanart edge fade | diffuse masks in `media/Textures.xbt`: `flixart.png` (blur path), `flixart_new.png` (Simple) — see 30 | left + bottom only |
+| Fanart edge fade | single mask `diffuse/flixart/flixart.png` for every style — see 30, 31a | left + bottom only |
+| Menu dimming wash | `background/combined_overlay.png` via `Background.ShowOverlay` — nine setters, none in the home menu | unchanged |
+| Hub top gradient | `Hub_Top_Bezier` — call site in `Hub_Controls` commented out; `main_bg_70`/`main_bg_30`/`main_bg_12` for a lighter dim — see 32 | off |
 | Wall grid vertical position | `wall_top` / `wall_bottom` (horizontal: do not set) | 0 / 0 |
 | Wall row pitch | `view_poster_itemlayout_h` — shared, moves row views too | 350 |
 | Default widget view | `widgets_row.xml` fallback rule | `List_Poster_Row` |

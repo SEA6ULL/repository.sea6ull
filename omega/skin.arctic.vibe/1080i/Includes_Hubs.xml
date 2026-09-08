@@ -207,6 +207,9 @@
         </definition>
     </include>
 
+    <!-- SKINMOD: definition kept in its original upstream form on purpose. Its single call site
+         in Hub_Controls is commented out (see below), which is what disables the top-bar dim.
+         To restore the gradient, uncomment that one line - do not edit this definition. -->
     <include name="Hub_Top_Bezier">
         <control type="image">
             <left>0</left>
@@ -293,7 +296,26 @@
 
 
             <include>Background_Transition</include>
-            <include condition="![$PARAM[widgets_only]]">Hub_Top_Bezier</include>
+            <!-- SKINMOD: top-bar artwork dim removed. This was:
+                     <include condition="![$PARAM[widgets_only]]">Hub_Top_Bezier</include>
+                 Hub_Top_Bezier is a full-width image over the top 50% of the screen drawing
+                 shadows/cornerspot.png at main_bg_70. flipx="true" mirrors the texture, so the
+                 dim is heaviest at the TOP-LEFT (69% black at x=3%, decaying to 15% at the right
+                 edge and to nothing below ~45% screen height).
+
+                 It faded in on $EXP[Exp_HubName_IsVisible], which is
+                     [container 300 active] | [$EXP[Exp_HomeMenu_HasFocus]]
+                 and Exp_HomeMenu_HasFocus is [Control.HasFocus(300|306|307|308|309|331)].
+                 Control 300 IS the home menu list (Includes_Home.xml:56) and is the same
+                 container Hub_Categories lays out horizontally as the top bar - so BOTH terms
+                 are true for the same reason whenever the top bar has focus.
+
+                 That is why gating the animation on Exp_HomeMenu_HasFocus alone did nothing in
+                 1.0.12: there is no case where this gradient draws that is not top-bar focus.
+                 Removing the call site is the only way to remove it. The definition above is
+                 left untouched; uncomment the line above to restore. For a lighter dim instead,
+                 restore the line and change main_bg_70 to main_bg_30 or main_bg_12 in the
+                 definition. MOD_CHANGELOG 32. -->
 
             <control type="group">
                 <include condition="$PARAM[is_homemenu]">Hub_Menu_Slide</include>
