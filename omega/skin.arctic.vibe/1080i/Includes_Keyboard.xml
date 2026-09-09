@@ -345,13 +345,18 @@
                  your hardware the fix is to raise 00:01; if 5000 is empty the SetFocus simply
                  no-ops and the panel correctly stays put. Cancel (301) is untouched, so backing
                  out still leaves you on the panel. -->
-            <onclick condition="[Window.IsVisible(1185) | Window.IsVisible(1105)]">AlarmClock(SearchDismissPanel,SetFocus(5000),00:01,silent)</onclick>
+                 SKINMOD: retimed 00:01 -> 00:02. DialogKeyboard.xml now parks focus on 9090 at
+                 00:01 on every close route, so this has to land after it or the two race and the
+                 winner is undefined. -->
+            <onclick condition="[Window.IsVisible(1185) | Window.IsVisible(1105)]">AlarmClock(SearchDismissPanel,SetFocus(5000),00:02,silent)</onclick>
             <!-- SKINMOD: second attempt, for when the results take longer than a second to load.
                  SetFocus on a container that is still empty does nothing, and in Search there is
                  no visible panel to fall back to - focus would sit on the offscreen idle button
                  while results quietly appeared behind it. Firing twice is harmless: if the first
-                 attempt worked, the second re-focuses a control that already has focus. -->
-            <onclick condition="[Window.IsVisible(1185) | Window.IsVisible(1105)]">AlarmClock(SearchDismissPanelRetry,SetFocus(5000),00:03,silent)</onclick>
+                 attempt worked, the second re-focuses a control that already has focus.
+                 SKINMOD: retimed 00:03 -> 00:04, keeping its two second gap after the first
+                 attempt now that that one moved to 00:02. -->
+            <onclick condition="[Window.IsVisible(1185) | Window.IsVisible(1105)]">AlarmClock(SearchDismissPanelRetry,SetFocus(5000),00:04,silent)</onclick>
         </include>
         <include content="Object_Keyboard_Button" description="Cancel">
             <param name="id">301</param>

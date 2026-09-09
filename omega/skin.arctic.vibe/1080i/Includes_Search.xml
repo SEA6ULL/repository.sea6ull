@@ -118,12 +118,17 @@
         <control type="edit" id="9099">
             <include>Object_Hidden_Item_Definition</include>
             <font>font_midi_bold</font>
-            <!-- Doubles as the idle control after the keyboard is cancelled, so it needs usable
-                 navigation: Down to the results, Enter re-opens the keyboard by itself because
-                 that is what Select on an edit control does. Back falls through to closing the
-                 window, which is Kodi's default. -->
+            <!-- Down to the results; Enter re-opens the keyboard by itself because that is what
+                 Select on an edit control does.
+
+                 SKINMOD: this is NO LONGER the idle control, and Back does NOT fall through to
+                 closing the window from here - an edit control swallows the backspace key even
+                 when empty, so parking here left the window unexitable on a remote. Focus is now
+                 moved to 9090 when the keyboard closes; see the comment in DialogKeyboard.xml.
+                 Focus should never rest here, but Up is wired to 9090 anyway so that if it ever
+                 does the user is one keypress from a control that behaves. -->
             <ondown>5000</ondown>
-            <onup>noop</onup>
+            <onup>9090</onup>
             <onleft>noop</onleft>
             <onright>noop</onright>
             <onfocus>ClearProperty(Background.ShowOverlay,Home)</onfocus>
@@ -153,9 +158,10 @@
              before the posted Select reached it, so the keyboard would never open at all.
              So nothing follows Action(Select). Post-keyboard focus is handled where it can be
              done safely: control 300's alarms in Includes_Keyboard.xml move focus to the results
-             after Done. On Cancel or Back, focus is simply left on 9099, which is a perfectly
-             good idle spot - Enter re-opens the keyboard (native edit control behaviour), Down
-             reaches the results, and Back leaves Search. -->
+             after Done, and DialogKeyboard.xml's onunload parks focus on 9090 on every close
+             route. SKINMOD: that park replaces the original assumption that 9099 was a fine idle
+             spot on Cancel. It is not - an edit control swallows the backspace key, so Back could
+             not leave Search. See DialogKeyboard.xml for the full explanation. -->
         <include content="Object_Hidden_Button">
             <param name="id">9095</param>
             <onfocus>SetFocus(9099)</onfocus>

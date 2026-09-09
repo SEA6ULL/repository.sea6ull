@@ -1,6 +1,6 @@
 # Arctic Vibe — Mod Changelog
 
-Ships as **Arctic Vibe** (`skin.arctic.vibe`, v1.1.3) by sea6ull.
+Ships as **Arctic Vibe** (`skin.arctic.vibe`, v1.1.4) by sea6ull.
 A modified fork of **Arctic Fuse 2** (`skin.arctic.fuse.2`, v2.12.12) by jurialmunkey.
 
 This document records every change made to the upstream skin, and — where it matters —
@@ -3533,6 +3533,111 @@ branches, no common baseline to diff against. Step 7 below is the guard.
 
 ---
 
+## 35. Search: empty keyboard cancel left the window unexitable
+
+Reported: open Search, type nothing, close the QWERTY with the **X** (Cancel) button. The blank
+Search screen cannot be left. Back does nothing, the arrow keys do nothing, Select re-opens the
+keyboard. Close it with the **checkmark** instead and Back works. On a PC, Escape leaves the
+window but Backspace does not.
+
+That last asymmetry is the whole diagnosis. Escape and Backspace are both "leave this window" keys
+and they are both bound in the global keymap, so if the window were simply refusing to close
+neither would work. One working and the other not means the two keys are not travelling by the
+same route.
+
+### Root cause
+
+Focus after Cancel sits on **edit control 9099**, and Kodi routes keys differently when an edit
+control has focus.
+
+`CInputManager::OnKey` sets `useKeyboard = true` whenever the focused control is
+`GUICONTROL_EDIT`. That switches the lookup from the active window's keymap section to the
+**VirtualKeyboard** section, and the two sections disagree about backspace:
+
+| Section | Binding | Action |
+|---|---|---|
+| global | `<backspace>Back</backspace>` | `ACTION_NAV_BACK` |
+| VirtualKeyboard | `<backspace>Backspace</backspace>` | `ACTION_BACKSPACE` |
+
+So the key arrives as `ACTION_BACKSPACE`, and `CGUIEditControl::OnAction` opens with:
+
+```cpp
+if (action.GetID() == ACTION_BACKSPACE)
+{
+  if (m_cursorPos)      // nothing to delete when the field is empty
+  {
+    ...
+  }
+  return true;          // consumed anyway
+}
+```
+
+The `return true` is **outside** the `m_cursorPos` guard. With an empty field the control deletes
+nothing, reports the action handled, and `useKeyboard`'s "failed to handle the keyboard action,
+drop down through to standard action" fallback never runs. The keypress is swallowed whole.
+
+Escape survives because the VirtualKeyboard section has no `<escape>` entry, so it falls back to
+the global `PreviousMenu`. `ACTION_PREVIOUS_MENU` is on `CInputManager`'s pass-through allowlist,
+the edit control does not handle it, and `CGUIWindow::OnAction`'s default switch closes the window.
+
+**A remote's Back button is a backspace key on most hardware** — Android TV, Fire TV and CEC all
+report it that way — which is why the remote behaves like the PC's Backspace and not like Escape.
+
+The checkmark worked only because control 300 already had `SetFocus(5000)` alarms on it (section
+30). They move focus off the edit control; Cancel had nothing equivalent.
+
+### Why the obvious fixes do not work
+
+* **`<onback>` on 9099** — never reached. `<onback>` is dispatched from `CGUIControl::OnAction`'s
+  `ACTION_NAV_BACK` case, and the action here is `ACTION_BACKSPACE`, consumed several branches
+  earlier in the subclass.
+* **An `onclick` on Cancel (301), mirroring Done (300)** — closes one door of three. Back or
+  Escape *on the keyboard itself* dismisses the dialog without clicking any button and lands in
+  exactly the same trap.
+
+### The fix
+
+Do not leave focus on an edit control. `1080i/DialogKeyboard.xml` gains an `onunload`, which fires
+on **every** close route — Done, Cancel, Back, Escape:
+
+```xml
+<onunload condition="Window.IsVisible(1185)">AlarmClock(SearchKeyboardPark,SetFocus(9090),00:01,silent)</onunload>
+```
+
+9090 is the offscreen idle button from `Search_Keyboard_Controls`. It is a plain button, so
+`useKeyboard` stays false and keys route normally: Back closes the window, Up re-opens the
+keyboard, Down reaches the results.
+
+Two supporting details:
+
+* **Alarm, not a bare `SetFocus`.** During deinit the keyboard is still the active window, so the
+  builtin would resolve against the dialog and miss. The one-second deferral lets it land on 1185
+  — the same trick control 300 already uses, and it fails for the same reason at `00:00`.
+* **Scoped to 1185.** Discover (1105) keeps its side panel and its own post-cancel behaviour.
+  Discover's 9099 is the same kind of trap in principle, but its panel is visible and its `ondown`
+  reaches a focusable letter grid, so a user is never stranded there. Left alone deliberately.
+
+Control 300's alarms were retimed **00:01 → 00:02** and **00:03 → 00:04** so the results focus
+always lands after the park rather than racing it. The two-second gap between first attempt and
+retry is unchanged.
+
+`Includes_Search.xml` also gets `9099`'s `<onup>` changed from `noop` to `9090`. Focus should never
+rest on 9099 now, but if it ever does the user is one keypress from a control that behaves.
+
+### Files touched
+
+| File | Change |
+|---|---|
+| `1080i/DialogKeyboard.xml` | new `onunload` park |
+| `1080i/Includes_Keyboard.xml` | control 300 alarms retimed to 00:02 / 00:04 |
+| `1080i/Includes_Search.xml` | 9099 `onup` → 9090; three stale comments corrected |
+
+The corrected comments matter as much as the code. All three asserted some version of "Back falls
+through to closing the window, which is Kodi's default" — a reasonable belief that happens to be
+false for edit controls, and the belief that produced the bug.
+
+---
+
 ## Validation performed after every change
 
 1. **XML well-formedness** across all files in `1080i/` (258 files at last count).
@@ -3581,8 +3686,9 @@ branches, no common baseline to diff against. Step 7 below is the guard.
 | Match OSD to content on/off | `OSD.MatchToContent` (positive sense) | off |
 | Auto-open QWERTY on Search | `AlarmClock(SearchAutoKeyboard,...)` in `Custom_1185_Search.xml` | 1s (00:00 does not fire) |
 | Up out of results target | `onup` param on `Recommendations_Widgets_Grouplist` | 9095 |
-| Checkmark to results delay | `AlarmClock(SearchDismissPanel,...)` on keyboard control 300 | 1s |
-| Checkmark to results retry | `AlarmClock(SearchDismissPanelRetry,...)` on keyboard control 300 | 3s |
+| Checkmark to results delay | `AlarmClock(SearchDismissPanel,...)` on keyboard control 300 | 2s |
+| Checkmark to results retry | `AlarmClock(SearchDismissPanelRetry,...)` on keyboard control 300 | 4s |
+| Post-keyboard idle focus | `AlarmClock(SearchKeyboardPark,...)` `onunload` in `DialogKeyboard.xml` — must stay below the two above — see 35 | 1s → 9090 |
 | Search window default focus | `focusid` param in `Custom_1185_Search.xml` | 9090 |
 | Discover panel icon row width | `9994` `<width>` in `Search_Panel_Keyboard` (60px per button) | 300 |
 | OSD inset per aspect ratio | bucket tables in `Animation_OSD_MatchContent_Bottom` / `_Top` / `_Dim` | 21-192px |

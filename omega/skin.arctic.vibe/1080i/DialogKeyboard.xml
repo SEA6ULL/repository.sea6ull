@@ -3,6 +3,34 @@
 
     <defaultcontrol always="true">300</defaultcontrol>
 
+    <!-- SKINMOD: park focus off the edit control when the keyboard closes over Search (1185).
+         Kodi restores focus to whatever opened the dialog, which here is edit control 9099. An
+         edit control changes how keys are routed: CInputManager sets useKeyboard=true whenever
+         the focused control is GUICONTROL_EDIT, which sends the key through the VirtualKeyboard
+         keymap section instead of the global one, and there backspace maps to Backspace rather
+         than Back. CGUIEditControl::OnAction then returns true for ACTION_BACKSPACE
+         unconditionally - even with an empty field and the cursor at 0 - so the action is
+         swallowed and never falls through to the global Back binding. Result: the window cannot
+         be left. Escape still works because it is absent from the VirtualKeyboard section and
+         falls back to PreviousMenu, which is on the pass-through allowlist and is not consumed.
+         Remotes that report Back as a backspace key (Android TV, Fire TV, most CEC) hit the
+         swallowed path, which is why Back is dead on a remote but Escape works on a PC.
+
+         An <onback> on 9099 does NOT fix this: the action arriving is ACTION_BACKSPACE, which is
+         consumed before CGUIControl::OnAction ever reaches its ACTION_NAV_BACK case. The only
+         fix is to not leave focus on an edit control, so focus is parked on 9090, the offscreen
+         idle button, which is a plain button and routes keys normally.
+
+         Here rather than on Cancel (301) because 301 is only one of the ways out: Back or Escape
+         on the keyboard itself closes the dialog without clicking any button, and that route
+         lands in exactly the same trap. onunload covers every route.
+
+         Alarm rather than a direct SetFocus: during deinit the dialog is still the active window,
+         so the builtin would resolve against the keyboard and miss. The deferral lets it land on
+         1185, the same mechanism control 300 already uses. Its own SetFocus(5000) alarms are
+         timed to fire after this one so the results win when there are results to focus. -->
+    <onunload condition="Window.IsVisible(1185)">AlarmClock(SearchKeyboardPark,SetFocus(9090),00:01,silent)</onunload>
+
     <controls>
         <include>Keyboard_Standard</include>
     </controls>
