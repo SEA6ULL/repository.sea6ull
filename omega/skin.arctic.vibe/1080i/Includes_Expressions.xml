@@ -298,6 +298,11 @@
     <!-- Misc -->
     <!-- ==== -->
     <expression name="Exp_AutoCompletion_IsEnabled">[System.HasAddon(plugin.program.autocompletion) + System.AddonIsEnabled(plugin.program.autocompletion) + !Skin.HasSetting(Keyboard.DisableAutoCompletion)]</expression>
+    <!-- SKINMOD: presence-only test for the autocompletion add-on. Search history in the full
+         keyboard is clicked through that add-on's "selectautocomplete" route, so the history
+         grid must key off the add-on being installed, NOT off Keyboard.DisableAutoCompletion.
+         Turning suggestions off must not take clickable search history down with it. -->
+    <expression name="Exp_AutoCompletion_IsInstalled">[System.HasAddon(plugin.program.autocompletion) + System.AddonIsEnabled(plugin.program.autocompletion)]</expression>
 
     <expression name="Exp_Video_IsNotPlaying">[![Player.HasVideo | [Player.HasAudio + !Skin.HasSetting(Background.Visualisation.Disabled) + Visualisation.Enabled]] | Player.Paused | Skin.HasSetting(Background.DisableVideo) | Window.IsVisible(1123)]</expression>
 

@@ -1,6 +1,36 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <window type="window" id="1185">
-    <include>Search_Window_Def</include>
+
+    <!-- SKINMOD: Search opens straight onto the full keyboard.
+         Deliberately here in the window file rather than in Search_Window_Def. It used to live in
+         the shared include behind an [$PARAM[autokeyboard]] condition, which added a param
+         substitution inside a boolean expression for no benefit - 1185 is the only window that
+         wants this, so it belongs to 1185.
+
+         It must come BEFORE the include: Search_Window_Def's own onload chain ends with
+         ClearProperty(CustomSearchTerm,Home), and onload actions run in document order. Placed
+         after the include, the CustomSearchTerm test below would always read empty and the
+         keyboard would also pop up on the Discover-to-Search swap, which arrives with a term
+         already set and has its own onload branch to handle it.
+
+         Conditions, both load-bearing:
+           CustomSearchTerm empty - see above.
+           !Window.Previous(...)  - backing out of a result reloads this window, and without this
+                                    you get the keyboard in your face every time you return from
+                                    a movie.
+
+         The alarm is a deferral, not a delay: it pushes SetFocus past OnInitWindow so a modal
+         dialog is not opened while the window is still initialising. 00:00 was tried and does NOT
+         fire - the window loads and the keyboard never appears. 00:01 is the shortest value
+         confirmed working on hardware; do not lower it without testing entry from a cold start. -->
+    <onload condition="String.IsEmpty(Window(Home).Property(CustomSearchTerm)) + !Window.Previous(MyVideoNav.xml)">AlarmClock(SearchAutoKeyboard,SetFocus(9095),00:01,silent)</onload>
+
+    <!-- focusid 9090 is the offscreen idle button from Search_Keyboard_Controls. Search has no
+         side panel, so it cannot use the shared default of 9992 (Discover's letter grid). -->
+    <include content="Search_Window_Def">
+        <param name="focusid">9090</param>
+    </include>
+
     <controls>
         <include>Search_View_User</include>
     </controls>

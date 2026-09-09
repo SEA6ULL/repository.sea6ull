@@ -334,6 +334,24 @@
             <font>font_midi_iconic</font>
             <label>&#xF058;</label>
             <onup>160</onup>
+            <!-- SKINMOD: move focus to the results once the keyboard closes. In Discover this
+                 also dismisses the side panel, which hides itself on !ControlGroup(5000).HasFocus();
+                 in Search there is no panel left and this is simply where focus belongs. Kodi sends control 300's click message to the dialog first
+                 and runs skin click actions afterwards, so this fires as the dialog closes and
+                 covers every route into the keyboard, not just the panel's Keyboard button.
+                 The one second delay is deliberate: the search term has to propagate through
+                 the encoder containers and the widget rows have to load, and SetFocus on a
+                 container that is still empty does nothing. If results are slower than this on
+                 your hardware the fix is to raise 00:01; if 5000 is empty the SetFocus simply
+                 no-ops and the panel correctly stays put. Cancel (301) is untouched, so backing
+                 out still leaves you on the panel. -->
+            <onclick condition="[Window.IsVisible(1185) | Window.IsVisible(1105)]">AlarmClock(SearchDismissPanel,SetFocus(5000),00:01,silent)</onclick>
+            <!-- SKINMOD: second attempt, for when the results take longer than a second to load.
+                 SetFocus on a container that is still empty does nothing, and in Search there is
+                 no visible panel to fall back to - focus would sit on the offscreen idle button
+                 while results quietly appeared behind it. Firing twice is harmless: if the first
+                 attempt worked, the second re-focuses a control that already has focus. -->
+            <onclick condition="[Window.IsVisible(1185) | Window.IsVisible(1105)]">AlarmClock(SearchDismissPanelRetry,SetFocus(5000),00:03,silent)</onclick>
         </include>
         <include content="Object_Keyboard_Button" description="Cancel">
             <param name="id">301</param>
@@ -474,6 +492,12 @@
                                 <width>keyboard_edit_w</width>
                                 <ondown>3</ondown>
                                 <onright>9898</onright>
+                                <!-- SKINMOD: Options was only reachable by pressing Right from the
+                                     text box, which is not discoverable. Up did nothing at all
+                                     because the control had no onup. 9898 is the Dialog_Manage
+                                     hidden button that opens the popup, so Up and Right now take
+                                     the same route. Right is deliberately left unchanged. -->
+                                <onup>9898</onup>
                                 <font>font_midi</font>
                             </control>
                         </control>
@@ -496,9 +520,31 @@
                                 <param name="itemlayout_w">356.66</param>
                                 <param name="itemlayout_include">Layout_DialogSimple</param>
                                 <param name="orientation">horizontal</param>
-                                <content>plugin://plugin.program.autocompletion?info=autocomplete&amp;&amp;id=$INFO[Control.GetLabel(312).index(1)]</content>
-                                <visible>!Control.IsViible(313)</visible>
-                                <visible>!Control.IsViible(314)</visible>
+                                <!-- SKINMOD: was a hardcoded autocompletion path; now also shows
+                                     search history while the edit control is empty. See
+                                     Path_Keyboard_Suggestions in Includes_Paths.xml. -->
+                                <content>$VAR[Path_Keyboard_Suggestions]</content>
+                                <!-- SKINMOD: upstream typo "IsViible". Kodi does not recognise the
+                                     condition, evaluates it as false, and !false left the grid
+                                     permanently visible - which happened to be the wanted result.
+                                     Spelling corrected so the Chinese code entry (313/314) really
+                                     does hide the grid, which was the original intent. -->
+                                <visible>!Control.IsVisible(313)</visible>
+                                <visible>!Control.IsVisible(314)</visible>
+                                <!-- SKINMOD: upstream had no onclick here at all. Suggestion items
+                                     carry a path from the autocompletion add-on and were opened by
+                                     Kodi's default container navigation, which focuses control 300
+                                     (the checkmark) and pushes the term in via the JSON-RPC
+                                     Input.SendText method. History items produced by
+                                     get_split_string carry only a label and no path, so they had no
+                                     way to be clicked. Calling that same add-on route explicitly
+                                     gives both kinds of entry one identical, predictable behaviour.
+                                     Text MUST go through the add-on (i.e. through Input.SendText)
+                                     and never be written into control 312 directly: the keyboard
+                                     dialog keeps its own copy of the text internally, and writing
+                                     to the control behind its back would leave Done submitting the
+                                     previous term. -->
+                                <onclick>RunPlugin("plugin://plugin.program.autocompletion/?info=selectautocomplete&amp;&amp;id=$INFO[Container(3).ListItem.Label]")</onclick>
                                 <onup>312</onup>
                                 <ondown>8001</ondown>
                             </include>

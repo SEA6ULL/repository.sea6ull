@@ -2923,3 +2923,18 @@ msgstr ""
 msgctxt "#31608"
 msgid "Match OSD to content"
 msgstr ""
+
+#: /1080i/Includes_Items.xml
+msgctxt "#31609"
+msgid "Clear search history"
+msgstr ""
+
+#: /1080i/Includes_Items.xml
+msgctxt "#31610"
+msgid "This permanently deletes every saved search term. It cannot be undone."
+msgstr ""
+
+#: /1080i/Includes_Items.xml
+msgctxt "#31611"
+msgid "Clear"
+msgstr ""

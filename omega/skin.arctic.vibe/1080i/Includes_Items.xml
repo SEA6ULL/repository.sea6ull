@@ -1593,17 +1593,43 @@
 
     <include name="Items_DialogKeyboard">
         <definition>
+            <!-- Control 309 is Kodi's CTL_BUTTON_LAYOUT. Kodi fills its label and cycles through
+                 the layouts ticked under Settings > Interface > Regional > Keyboard layouts. With
+                 only one layout enabled it cycles 0 back to 0 and appears to do nothing; that is
+                 correct behaviour, not dead skin code, so it is left alone. -->
             <include content="Settings_ButtonImage">
                 <param name="id">309</param>
                 <param name="groupid">9309</param>
                 <param name="icon">special://skin/extras/icons/language.png</param>
+            </include>
+            <!-- SKINMOD: clear the search history from where the history is actually shown.
+                 Gated to the two search windows only - this popup belongs to Kodi's generic
+                 keyboard, which is also used for renaming files and typing paths. Deliberately
+                 NOT gated on the history being non-empty: this sits in a focusable grouplist,
+                 and a button that vanishes underneath the cursor leaves focus nowhere. Resetting
+                 an already empty skin string is harmless. Confirmed with a yes/no because there
+                 is no undo. -->
+            <include content="Settings_ButtonImage">
+                <param name="id">9096</param>
+                <param name="groupid">9311</param>
+                <label>$LOCALIZE[31609]</label>
+                <param name="icon">special://skin/extras/icons/clock-rotate-left.png</param>
+                <visible>[Window.IsVisible(1185) | Window.IsVisible(1105)]</visible>
+                <onclick>RunScript(script.skinvariables,run_dialog=yesno,"heading=$LOCALIZE[31609]","message=$LOCALIZE[31610]",yeslabel=$LOCALIZE[31611],nolabel=$LOCALIZE[222],"executebuiltin=Skin.Reset(SearchHistory)")</onclick>
             </include>
             <include content="Settings_ButtonImage">
                 <param name="id">9099</param>
                 <param name="groupid">9399</param>
                 <label>$LOCALIZE[15067]</label>
                 <param name="icon">special://skin/extras/icons/circle-xmark.png</param>
-                <onclick>PreviousMenu</onclick>
+                <!-- SKINMOD: was PreviousMenu. In most Dialog_Manage hosts that just backs out of
+                     the popup, but this popup lives inside Kodi's keyboard dialog, where Back
+                     closes the KEYBOARD - so Close was dropping the whole full keyboard and
+                     landing you back on the small panel. 9897 is Dialog_Manage's bounce button;
+                     its onfocus forwards to the include's onback target (8000, the top key row),
+                     which drops focus out of grouplist 9800 and lets the popup's own visibility
+                     condition close it. Keyboard untouched. -->
+                <onclick>SetFocus(9897)</onclick>
             </include>
         </definition>
     </include>

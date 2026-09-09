@@ -1,6 +1,6 @@
 # Arctic Vibe — Mod Changelog
 
-Ships as **Arctic Vibe** (`skin.arctic.vibe`, v1.0.14) by sea6ull.
+Ships as **Arctic Vibe** (`skin.arctic.vibe`, v1.1.3) by sea6ull.
 A modified fork of **Arctic Fuse 2** (`skin.arctic.fuse.2`, v2.12.12) by jurialmunkey.
 
 This document records every change made to the upstream skin, and — where it matters —
@@ -490,7 +490,7 @@ $INFO[System.BuildVersionShort,Kodi ,]$INFO[System.AddonVersion(skin.arctic.vibe
 * `AF2 v` → `AV v`.
 * The version number itself is **not hardcoded** — it is read live from `addon.xml` via
   `System.AddonVersion`, which is why the `version` attribute there is what this line renders —
-  currently `version="1.0.14"`, so it reads "AV v1.0.14". Keep it that way; hardcoding would let the
+  currently `version="1.0.9"`, so it reads "AV v1.0.9". Keep it that way; hardcoding would let the
   two drift apart.
 
 The info label targets the addon id, which is now `skin.arctic.vibe` (see section 10).
@@ -2739,7 +2739,455 @@ release's changelog section is treated as an unintended revert until confirmed.
 
 ---
 
-## 30. Fanart edge fade: Simple background style loses its right and top diffuse fade
+## 30. Search: land on the full QWERTY, search history inside it, and a working Options menu
+
+Six related changes to the Search screen. Read the anatomy section first — most of the traps here
+come from the fact that **two different dialogs** are involved and they are easy to confuse.
+
+### Anatomy — what is actually on screen
+
+| Piece | Where | Width | Key controls |
+|---|---|---|---|
+| **Side panel** | `Search_Panel` in `Includes_Search.xml` | 760px (`Dimension_DialogSideMenu`) | edit `9099`, letter grid `9992`, icon row `9994`, suggestion list `9993`, category list `5099` |
+| **Full QWERTY** | `Keyboard_Standard` in `Includes_Keyboard.xml`, via `DialogKeyboard.xml` | 1190px (`Dimension_DialogKeysMenu`) | edit `312`, suggestion grid `3`, key rows `8001`-`8005`, Done `300`, Cancel `301` |
+
+Both windows `1185` (Search) and `1105` (Discover) share `Search_Window_Def` and `Search_Panel`.
+The **Options** button (the sliders icon, top right) belongs to the **full QWERTY**, not the side
+panel — it is `Dialog_Manage_Head_Button` inside `Keyboard_Standard`, and its contents come from
+`Items_DialogKeyboard` in `Includes_Items.xml`.
+
+`Window.IsVisible(1185)` is **true while the keyboard dialog is on top**, because dialogs do not
+enter the window history. Every "am I in a search window?" gate below relies on this.
+
+### 30a. Open the full QWERTY when Search opens
+
+New skin setting `Search.AutoOpenKeyboard` (Behaviour → Search, string `31612`), **off by default**.
+
+`Search_Panel` gained hidden button `9095`, whose `onfocus` chain is
+`SetFocus(9099)` → `Action(Select)` → `SetFocus(9992)`. `Search_Window_Def` focuses it from
+`<onload>` behind a one second `AlarmClock`.
+
+**Why a hidden button and not onload directly.** `Action(Select)` on an edit control opens the
+keyboard **modally and blocks**, so the action after it does not run until the keyboard closes.
+That is what makes the chain work, and it is the same mechanism the panel's own Keyboard button
+in row `9994` has always used. Firing it straight from `<onload>` would open a modal dialog while
+the window is still initialising.
+
+**Why the button sits outside the panel's group.** The panel group's `<visible>` flips off the
+moment focus reaches the results container, and `SetFocus` into a hidden group is not reliable.
+`9095` is therefore a direct child of `Search_Panel`, above that group.
+
+The four onload conditions are all load-bearing — see the comment in the source. In particular
+`!Window.Previous(MyVideoNav.xml)` stops the keyboard reappearing every time you back out of a
+result, and `Window.IsVisible(1185)` keeps it out of Discover. **If any condition misreads, the
+window simply behaves as it did before** — that failure direction was chosen deliberately.
+
+### 30b. Search history in the QWERTY's suggestion grid
+
+Control `3` is a 3x3 grid (item 356.66 x 80 in a 240px group) between the text box and the number
+row. Upstream hardcoded it to the autocompletion add-on, so it sat **empty until you typed**.
+
+New variable `Path_Keyboard_Suggestions` (`Includes_Paths.xml`):
+
+* text present → the original autocompletion path, unchanged;
+* text empty, in window 1185/1105, add-on installed → `get_split_string` over
+  `Skin.String(SearchHistory)`.
+
+New expression `Exp_AutoCompletion_IsInstalled` — presence only. It deliberately does **not**
+include `!Skin.HasSetting(Keyboard.DisableAutoCompletion)` the way `Exp_AutoCompletion_IsEnabled`
+does, so turning suggestions off does not also remove clickable history.
+
+### 30c. Making those entries clickable — the important one
+
+Upstream control `3` has **no `<onclick>` at all**, yet clicking a suggestion works. The behaviour
+comes entirely from the add-on: its list items carry
+`plugin://plugin.program.autocompletion/?info=selectautocomplete&&id=<term>`, and opening that
+path makes the add-on focus control `300` (the checkmark) and push the text in via the JSON-RPC
+`Input.SendText` method.
+
+**This is the rule to remember: text must reach the keyboard through `Input.SendText`, never by
+writing to control 312.** `CGUIDialogKeyboardGeneric` holds its own copy of the text in `m_text`
+and only syncs when *it* handles the input. Setting the edit control from outside updates the
+visible box but leaves `m_text` stale, so Done would submit the **previous** term — a silent
+wrong-result bug. `script.skinvariables`' `set_editcontrol` is fine for the side panel's `9099`
+and must not be pointed at `312`.
+
+History items from `get_split_string` carry a label and **no path** (confirmed against the
+script.skinvariables wiki: the route takes only `separator=` and `values=`), so they had no way to
+be clicked. The fix calls the add-on's route explicitly:
+
+```xml
+<onclick>RunPlugin("plugin://plugin.program.autocompletion/?info=selectautocomplete&amp;&amp;id=$INFO[Container(3).ListItem.Label]")</onclick>
+```
+
+**Why one onclick for both kinds of entry rather than a conditional one.** `CGUIBaseContainer`
+checks `m_clickActions.HasAnyActions()` and, if true, executes them **instead of** the default
+message. A condition that evaluates false still counts as "has actions", so a conditional onclick
+would have silently broken suggestion clicks. One unconditional action gives both entry types the
+same path.
+
+**Known risk, untested on hardware.** `RunPlugin` passes handle `-1`. The add-on calls
+`setResolvedUrl` on it, which Kodi logs as a bad handle and ignores without raising, so execution
+continues to the focus and `Input.SendText` calls. This was verified by reading the add-on source,
+not by running it. **If history clicks do nothing, look here first**; the fallback is to close the
+keyboard and write into `9099` instead, using a sequential chain file in the style of
+`shortcuts/builtins/skinvariables-closeosd.json`, at the cost of no longer landing on the checkmark.
+
+**Dependency created:** clickable history in the QWERTY needs `plugin.program.autocompletion`
+installed. This is why 30b gates on it. Without the add-on the QWERTY grid stays empty and the
+side panel remains the route to history — one behaviour or the other, never a half-working grid.
+
+### 30d. Options menu — layout button kept, Clear Search History added
+
+Control `309` is Kodi's `CTL_BUTTON_LAYOUT`. Kodi fills its label and cycles through the layouts
+ticked in **Settings → Interface → Regional → Keyboard layouts**. With a single layout enabled it
+cycles index 0 back to 0, which looks broken but is correct. **It is not dead skin code — leave it
+alone.** Enabling a second layout makes it work.
+
+Added alongside it: **Clear Search History** (`9096` / group `9311`, string `31609`,
+`clock-rotate-left.png`), running `Skin.Reset(SearchHistory)` behind a `run_dialog=yesno`.
+
+Visible only in windows 1185/1105 — this popup belongs to Kodi's *generic* keyboard, which is also
+used for renaming files and typing network paths. It is deliberately **not** gated on the history
+being non-empty: it lives in a focusable grouplist, and a button that vanishes under the cursor
+leaves focus nowhere. Resetting an empty skin string is harmless.
+
+### 30e. Up now opens Options
+
+Control `312` had `<onright>9898</onright>` but **no `<onup>` at all**, so Options was reachable
+only by pressing Right from the text box. Added `<onup>9898</onup>`; `9898` is the `Dialog_Manage`
+hidden button that opens the popup. Right is unchanged.
+
+### 30f. The checkmark now dismisses the panel
+
+The panel hides on `!ControlGroup(5000).HasFocus()`, so "dismiss the panel" means "focus the
+results container". Added to control `300`:
+
+```xml
+<onclick condition="[Window.IsVisible(1185) | Window.IsVisible(1105)]">AlarmClock(SearchDismissPanel,SetFocus(5000),00:01,silent)</onclick>
+```
+
+Kodi's `CGUIButtonControl::OnClick` sends the click **message first** and runs skin click actions
+**afterwards**, so this fires as the dialog closes and covers *every* route into the keyboard, not
+just the panel's Keyboard button. Cancel (`301`) is untouched, so backing out still leaves you on
+the panel.
+
+**The one second delay is a tuning knob, not a magic number.** The term has to propagate through
+the `Search_Term_DoubleEncoder` containers before the widget rows repath and load; `SetFocus` on a
+container that is still empty is a no-op. If results are slower than one second, raise `00:01`.
+The failure mode is benign: focus stays on the panel.
+
+### 30g. Side panel `window_id` bug
+
+`Search_Panel_Autocomplete` hardcoded `window_id=1105` in its `set_editcontrol` call, but the
+include is only ever compiled into **1185** (`<include condition="Window.IsVisible(1185)">` in
+`Search_Panel`). The script was writing into a window that was not on screen, so clicking a
+history entry or suggestion **in the side panel silently did nothing**. Changed to `1185`.
+
+### 30h. `IsViible` typo
+
+`Keyboard_Standard` had `!Control.IsViible(313)` and `(314)`. Kodi does not recognise the
+condition, evaluates it as false, and `!false` left the grid permanently visible — accidentally the
+wanted result. Spelling corrected so the Chinese code entry really does hide the grid, as intended.
+
+### 30i. Suppressing the side panel across the keyboard transitions (v1.0.10 follow-up)
+
+**Reported:** with `Search.AutoOpenKeyboard` on, the 760px side panel was still visible on the way
+in and on the way out — it slid in, the full keyboard slid in over it, and the sequence reversed on
+exit.
+
+**Cause:** the two `AlarmClock` delays. The panel's own `!ControlGroup(5000).HasFocus()` rule is
+true during both gaps, so it rendered — with its `Animation_Right_Delay` slide — for the second
+before the keyboard opened and the second after the checkmark before focus reached the results.
+Nothing was wrong with the alarms; the panel simply had no reason to hide yet.
+
+**Fix:** a short-lived `Window(Home).Property(Search.HideSidePanel)`, added to the visibility of
+both the panel group and its `Dialog_Dim_Overlay`.
+
+| Set / cleared | Where | Why |
+|---|---|---|
+| **Set** | `Search_Window_Def` `<onload>`, same conditions as the auto-open alarm | before any frame is drawn, so the panel never appears on entry |
+| **Set** | keyboard control `300` `<onclick>` | stops it sliding back in under the closing keyboard |
+| **Clear** | `AlarmClock(SearchRevealPanel,...)` on control `300`, at 3s | expiry, see below |
+| **Clear** | keyboard control `301` `<onclick>` | cancel means stay in Search, hand the panel back at once |
+| **Clear** | `9095` chain, when `9099` is still empty | backstop for dismissing the keyboard with **Back**, which never clicks 301 |
+| **Clear** | `Search_Window_Def` `<onunload>` | housekeeping, it is a Home property |
+
+**Why the property expires instead of persisting.** The obvious alternative — clear it from
+`<onfocus>` on each panel control — does not work. `<defaultcontrol>` focuses `9992` during window
+init, which would clear the property immediately after onload set it, and the `9095` chain focuses
+`9992` again on the way out. Expiring at 3s sidesteps the ordering entirely: by then focus is on
+`5000` and the panel's original rule keeps it hidden without help. It also fails in the right
+direction — a search returning **no** results never focuses `5000`, so the expiry hands the panel
+back rather than stranding the user on an empty screen.
+
+**Why the 9095 chain tests the edit control rather than a cancel flag.** Kodi's keyboard can be
+dismissed with Back as well as Cancel, and Back does not click control `301`. On any cancel the
+edit control keeps its previous value, which on the auto-open path is empty — so "still empty"
+is a reliable proxy for "nothing was searched".
+
+`allowhiddenfocus="true"` was already on the panel group, so focus parked on `9992`/`9099` while
+the panel is suppressed is safe and needs no extra handling.
+
+**Worst case if a clear is missed:** the panel stays hidden for the rest of that one visit, and
+`<onunload>` resets it on exit. It cannot get stuck permanently invisible.
+
+---
+
+### 30j. Up from the results, and the entry delay (v1.0.11 follow-up)
+
+**Entry delay.** `AlarmClock(SearchAutoKeyboard,...)` dropped from `00:01` to `00:00`. Now that 30i
+hides the panel across the transition, the one second was just dead screen. `00:00` still defers
+past `OnInitWindow` — the skin already uses `00:00` alarms elsewhere for exactly this — it simply
+does not wait a further second. **If the keyboard stops opening on entry, put this back to
+`00:01`**; that value was confirmed working on hardware.
+
+**Up from the top widget row opened the small panel.** Grouplist `5000` takes its `<onup>` from a
+param, and `Search_View_User` passed `9090` — the side panel's grouplist — so Up always went to the
+panel regardless of the setting.
+
+Changed to new router button `9093`, which reads the setting at runtime:
+
+```xml
+<onfocus condition="Skin.HasSetting(Search.AutoOpenKeyboard) + Window.IsVisible(1185)">SetFocus(9095)</onfocus>
+<onfocus condition="[!Skin.HasSetting(Search.AutoOpenKeyboard) | !Window.IsVisible(1185)]">SetFocus(9090)</onfocus>
+```
+
+**Why a router and not a conditional target.** `<onup>` takes a single control id, and an
+`<include condition="...">` around the whole grouplist would be resolved **once at window load**,
+so toggling the setting would need a skin reload to take effect. A hidden button evaluates its
+`<onfocus>` conditions every time it is entered. `9093` is only ever reached from grouplist `5000`,
+so it cannot loop with `9095`.
+
+`Search_View_Discover` (1105, line ~159) deliberately keeps `9090` — auto-open does not apply there.
+
+**`9095` now suppresses the panel itself.** It has a second entry point, so it can no longer assume
+`<onload>` already set `Search.HideSidePanel`; without it the panel flashed between `SetFocus(9099)`
+and the keyboard appearing. It also arms the reveal alarm, which is the backstop for dismissing the
+keyboard with **Back** — Cancel clears the property via control `301` and Done re-arms the same
+alarm, but Back goes through neither. On the window-load path these two lines are harmlessly
+redundant.
+
+Worth knowing: the alarm firing while the keyboard is still open does nothing visible, because the
+1190px keyboard completely covers the 760px panel. The property only ever matters in the gaps.
+
+---
+
+### 30k. Three fixes to the transitions (v1.0.12 follow-up)
+
+**Options > Close was closing the whole keyboard.** The Close button in `Items_DialogKeyboard` ran
+`PreviousMenu`. In most `Dialog_Manage` hosts that simply backs out of the popup, but this popup
+lives inside **Kodi's keyboard dialog**, where Back closes the keyboard — so Close dropped the full
+keyboard and dumped you back on the small panel. Changed to `SetFocus(9897)`, `Dialog_Manage`'s
+bounce button, whose `<onfocus>` forwards to the include's `onback` target (`8000`, the top key
+row). Focus leaves grouplist `9800`, the popup's own visibility condition closes it, and the
+keyboard is untouched. **This bug predates section 30** — it was simply invisible before, because
+closing the keyboard used to look like normal behaviour.
+
+**Panel flashing on the way up out of the results.** Each `SetFocus` is a GUI message, so
+`9093 -> 9095` is a second hop, and leaving grouplist `5000` already satisfies the panel's own
+`!ControlGroup(5000).HasFocus()` rule. `SetProperty(Search.HideSidePanel,...)` moved up into `9093`
+so it happens on the **first** hop. `9095` still sets it too — harmless, and it is also entered
+from `<onload>`.
+
+**A second guard on the panel, `!Window.IsVisible(10103)`.** 10103 is `WINDOW_DIALOG_KEYBOARD`
+(`DialogKeyboard.xml`), so the panel can now never draw while the full keyboard is up, whatever any
+timer is doing. This matters because the panel's `Dialog_Dim_Overlay` is **full screen**: the 1190px
+keyboard hides the 760px panel but not its dim, so the `SearchRevealPanel` alarm expiring mid-
+keyboard could wash the screen behind it. The two guards do different jobs and both are needed:
+
+| Guard | Covers |
+|---|---|
+| `!Window.IsVisible(10103)` | the whole time the keyboard is open — deterministic, no timers |
+| `String.IsEmpty(Window(Home).Property(Search.HideSidePanel))` | only the gaps either side, which the first guard cannot see |
+
+**Still unexplained:** a window reported opening and closing behind the keyboard roughly a second
+after pressing Up from the results. The dim-overlay behaviour above is the most likely cause and
+should now be gone. If it persists it is something else — the candidates are a TMDb Helper busy
+dialog from the widget containers reloading as focus leaves `5000`, or `Action(Select)` in the
+`9095` chain reaching the widget row instead of edit control `9099` and opening the info dialog.
+The second would mean the `SetFocus` before it had not landed, which should not happen — the
+`SetFocus` builtin sends its message synchronously — but it is the one worth ruling out, and a
+debug log would name the window either way.
+
+---
+
+### 30l. Side panel removed from Search (v1.0.13 follow-up)
+
+The panel is gone from window **1185**. The full keyboard is the search UI. Window **1105**
+(Discover) is filter-led and genuinely needs its panel, so `Search_Panel` is untouched and still
+used there.
+
+**This deletes the whole suppression layer from 30i/30j**: the `Search.HideSidePanel` property and
+its two sets and four clears, the `SearchRevealPanel` alarm, the `9093` router, the
+`!Window.IsVisible(10103)` guard, and the `Search.AutoOpenKeyboard` setting with string `31612`.
+All of that existed to decide, at runtime, whether a panel should be on screen right now. With no
+panel there is nothing to decide, and the flash and the window-behind-the-keyboard go with it —
+both were artifacts of showing and hiding.
+
+#### What survives, and why
+
+New include `Search_Keyboard_Controls` replaces `Search_Panel` in `Search_View_User`. Everything in
+it is offscreen.
+
+| id | What | Why it cannot just be deleted |
+|---|---|---|
+| `9099` | the edit control | ~70 references across `Includes_Paths`, `Includes_Labels`, `Includes_Search` and the widget generator read `Control.GetLabel(9099)`. Kodi's keyboard is opened **by** it and writes back **into** it. |
+| `5099` | category list | the widget rows and info panel read `Container(5099).ListItem.Property(guid)`. Item 0 is `$LOCALIZE[593]` ("All"), nothing focuses it, so it sits on All forever — which is what "search everything" means. |
+| `9090` | idle/parking button | reuses the panel grouplist's old id so the stale `menuid` references in the generated widget rows still resolve to a real control instead of logging a miss. |
+| `9095` | opens the keyboard | unchanged mechanism, new routing. |
+
+`5099` is deliberately **not** inside a hidden group — a container that never becomes visible may
+never load its content, and an unloaded `5099` would report an empty guid for the wrong reason. Its
+own `Animation_ConditionalFade` already fades it out whenever unfocused, which is always.
+
+`9099` keeps a real font. `Object_Hidden_Button` blanks its font with `<font />`, which is fine for
+a button, but an edit control needs one to build its text layout — so it is parked offscreen
+instead of being blanked.
+
+#### Focus routing
+
+`Search_Window_Def` is now parameterised, because 1185 and 1105 no longer share a layout. Defaults
+reproduce the old behaviour exactly, so Discover's window file needed no change; `Custom_1185_Search.xml`
+passes `focusid=9090` and `autokeyboard=true`.
+
+When the keyboard closes, `9095` picks one of three outcomes:
+
+| Condition | Result |
+|---|---|
+| results exist | focus them — covers Done, and Cancel after an earlier search |
+| no results, term set | park on `9090` with "No Results" on screen; Back exits, OK re-opens the keyboard |
+| no results, no term | `PreviousMenu` — backed out of the keyboard having never searched, so leave Search |
+
+On a **first** search `5000` is still empty at that moment, so it parks — and control `300`'s
+alarms then move focus to the results once they load. That is why there are now two of them, at
+`00:01` and `00:03`: `SetFocus` on an empty container does nothing, and with no visible panel to
+fall back on, focus would otherwise sit on the offscreen idle button while results quietly
+appeared behind it.
+
+Up out of the top widget row goes straight to `9095`. Down was `9090` (the panel grouplist) and is
+now `noop`, since there is nothing below.
+
+#### Known dead ends, left deliberately
+
+`5099`'s own `onclick`/`onright` point at `5098`, the panel's "Content:" button, which no longer
+exists in 1185. They are unreachable because nothing focuses `5099`. The generated widget rows
+still carry `menuid 9090`, which now resolves to the idle button rather than the panel grouplist;
+they are inert anyway because `onwrap` is `[False]`. `Search_Panel_Autocomplete` and the
+`Object_SearchLetter_Click_*` T9 includes are now dead for Search but still live for Discover.
+
+#### Why not a QWERTY built into the panel
+
+Recorded because it will come up again. The panel's letter keys are not a keyboard — they are a
+**T9 keypad**: `a` is `Number2` once, `c` is `Number2` three times, `s` is `Number7` four times, and
+Kodi's edit control does the multi-tap decoding. Multi-tap cycles the *same* character when the
+same key is pressed twice inside about a second, so `hello` types as `helo` — `l` is `Number5` x3,
+and six presses of `Number5` cycle j,k,l,j,k,l into one character. A QWERTY drawn over that
+mechanism would promise something it cannot do. Replacing the mechanism means a `RunScript` per
+keystroke (100-300ms each, and it breaks on apostrophes, `+`, `%`, spaces), because Kodi has no
+builtin for "type this character into that control". That is why `DialogKeyboard` is a C++ dialog.
+
+---
+
+### 30m. Entry auto-open fixed (v1.1.0 follow-up)
+
+**Symptom:** entering Search showed the "Welcome" message and nothing else. Pressing Enter opened
+the keyboard, so `9095` and its chain were fine — the trigger was not firing.
+
+**Cause: `AlarmClock(...,00:00,...)` does not fire.** It was lowered from `00:01` in 30j on the
+reasoning that other `00:00` alarms exist in the skin and that the value was only a deferral past
+`OnInitWindow`, not a wait. That reasoning was wrong, or at least not true here. Restored to
+`00:01`, which is the shortest value confirmed working on hardware. **Do not lower it again
+without testing entry from a cold start** — the failure is silent and easy to miss, because
+everything else about the window still works.
+
+**Also moved out of `Search_Window_Def` into `Custom_1185_Search.xml`.** The onload had been
+sitting in the shared include behind an `[$PARAM[autokeyboard]]` condition — a param substitution
+inside a boolean expression, for the benefit of exactly one window. 1185 is the only window that
+wants this, so it now belongs to 1185, and the `autokeyboard` param is gone.
+
+**Ordering matters and is not obvious.** The onload must come **before** the `Search_Window_Def`
+include in the window file. `Search_Window_Def`'s own onload chain ends with
+`ClearProperty(CustomSearchTerm,Home)`, and onload actions run in document order — so placed after
+the include, the `String.IsEmpty(...CustomSearchTerm)` test would always read empty and the
+keyboard would also pop up on the Discover-to-Search swap, which arrives with a term already set
+and has its own onload branch to handle it.
+
+---
+
+### 30n. Entry keyboard flashed open then closed (v1.1.1 follow-up)
+
+**Symptom:** with the alarm back at `00:01` the keyboard appeared for a split second on entry and
+vanished. Pressing Enter afterwards opened it normally and it stayed.
+
+**Cause — and it invalidates an assumption used throughout section 30.**
+
+`Action(Select)` on an edit control blocks until the keyboard closes **only when the chain is
+entered from a real user action**. Entered from an `AlarmClock` — which is how window entry
+triggers it — the builtin runs on the alarm thread, the action is *posted* rather than executed,
+and every line after it runs immediately, while the keyboard is still opening.
+
+`9095`'s chain ended with, for the cold-entry case of no results and no search term:
+
+```xml
+<onfocus condition="...NumItems,0) + String.IsEmpty(Control.GetLabel(9099).index(1))">PreviousMenu</onfocus>
+```
+
+On the alarm path that fired the instant the keyboard appeared and closed it. On the Enter path
+`Action(Select)` really did block, so by the time those lines ran a term had been typed and the
+condition no longer matched — which is exactly why one route worked and the other did not.
+
+This is also why 30m looked like "`00:00` does not fire". It probably fired all along; the chain
+ran, `PreviousMenu` closed the keyboard, and the result was indistinguishable from nothing
+happening. **`00:01` is still the value to keep** — it is the one confirmed working end to end —
+but the earlier diagnosis was wrong about the mechanism.
+
+**Fix: nothing follows `Action(Select)`.** `9095` is now two lines. Any `SetFocus` there would have
+been just as dangerous in the other direction: on the alarm path it would move focus off `9099`
+before the posted Select arrived, so the keyboard would never open at all.
+
+Post-keyboard focus moved to where it can be done safely:
+
+| After | Focus goes to | How |
+|---|---|---|
+| Done | the results | control `300`'s alarms at `00:01`/`00:03`, unchanged |
+| Cancel / Back | stays on `9099` | no action at all |
+
+`9099` gained navigation so it works as an idle spot: Down reaches the results, Enter re-opens the
+keyboard (native edit-control behaviour, no skin code), Back leaves Search.
+
+**Behaviour dropped:** backing out of the keyboard without typing no longer closes Search by
+itself. That needed `PreviousMenu` in the chain — the one destructive action — and it is not worth
+the fragility. Back from the idle control does the same thing in one keypress.
+
+**Rule for future work in this area:** never put anything after `Action(Select)` in a chain that
+can be reached from an `AlarmClock`. If something must happen after the keyboard closes, hang it
+off keyboard control `300`/`301` instead, where it is driven by a real click.
+
+---
+
+### Other changes
+
+* Icon row `9994` widened 240 → 300. It is a fixed-width horizontal panel of 60px slots with four
+  items visible (Discover/Search swap by window); the added Clear Search History button
+  (`&#xf1da;`, clock-rotate-left) makes five. **Adding another button here means widening again.**
+  All glyphs used were checked against `fonts/fa-solid-900.ttf` before use.
+* New strings `31609`-`31612` (en_gb only; other languages fall back).
+* Existing `31376` "Reset discover search history" in skin settings is untouched and still works.
+
+### What needs testing on hardware
+
+Nothing here could be run. In rough order of risk:
+
+1. **History clicks in the QWERTY** (30c) — the `RunPlugin` handle `-1` behaviour.
+2. **Auto-open timing** (30a) — whether one second is enough for the window to settle.
+3. **Done → results timing** (30f) — whether one second is enough for results to load.
+4. **`Window.IsVisible(1185)` during `<onload>`** — asserted from Kodi's window-init order, and
+   the pre-existing conditional includes in `Search_Panel` depend on the same assumption.
+
+---
+
+## 31. Fanart edge fade: Simple background style loses its right and top diffuse fade
 
 **Key files:** `media/Textures.xbt` (rebuilt), `1080i/Includes_Background.xml` (reference only — not edited)
 
@@ -2843,24 +3291,24 @@ Any rebuild that also changes `flixart.png` has substituted the mask under the w
 
 ---
 
-## 31. One fanart diffuse for every style (31b was a misdiagnosis, reverted in 1.0.12)
+## 32. One fanart diffuse for every style (32b was a misdiagnosis, reverted in 1.0.12)
 
 **Key files:** `1080i/Includes_Background.xml`, `1080i/Includes_Home.xml`
 
-31a is a hygiene change to the fanart diffuse and shipped in 1.0.11. 31b was an attempted fix for
+32a is a hygiene change to the fanart diffuse and shipped in 1.0.11. 32b was an attempted fix for
 the reported top-bar dimming; it was based on a wrong reading of the skin, did not work, and was
-reverted in 1.0.12. The real cause and fix are in section 32.
+reverted in 1.0.12. The real cause and fix are in section 33.
 
-### 31a. The Simple diffuse override is gone
+### 32a. The Simple diffuse override is gone
 
 `Background_Artwork`'s Simple branch carried
 `<param name="diffuse">diffuse/flixart/flixart_new.png</param>`, overriding
-`Background_FlixArt`'s default of `flixart.png` (see section 30 for the split). That override is
+`Background_FlixArt`'s default of `flixart.png` (see section 31 for the split). That override is
 removed, so **both branches now resolve to `flixart.png`** and cannot drift apart again.
 
 This is a no-op visually and was done for hygiene, not appearance: after section 30 the two
 textures are the same mask, agreeing to within 2/255 at every pixel. Anyone diffing releases
-looking for the top-bar fix will not find it here — see section 32.
+looking for the top-bar fix will not find it here — see section 33.
 
 `diffuse/flixart/flixart.png` is now the **only** flixart diffuse the skin can reach through
 `Background_FlixArt`. Two entries in the bundle are no longer referenced by any code path:
@@ -2878,7 +3326,7 @@ reaches it** — if a right-side fade is ever reported again, it is not this fil
 stay. It is the complement mask (opaque left/bottom, clear right/top) drawn as a black fill inside
 `Background_Video`, and has nothing to do with the artwork panel's edge fade.
 
-### 31b. FAILED APPROACH — `Background.ShowOverlay` on the Ribbon menu. Reverted in 1.0.12.
+### 32b. FAILED APPROACH — `Background.ShowOverlay` on the Ribbon menu. Reverted in 1.0.12.
 
 **This subsection describes a change that was shipped in 1.0.11, did not fix the reported symptom,
 and was reverted. `1080i/Includes_Home.xml` is byte-identical to 1.0.9 again. It is kept here so the
@@ -2899,7 +3347,7 @@ left-hand vertical side menu**, not a horizontal one. The `Home.MenuStyle` value
 
 The genuine top bar is the **hub category row**, and it *clears* both `Background.ShowOverlay` and
 `Background.HideArtwork` on focus (`Includes_Hubs.xml:510`, and `:84` for the submenu row). The
-overlay path was therefore never involved. See section 32 for the real cause.
+overlay path was therefore never involved. See section 33 for the real cause.
 
 **Two things that should have caught this earlier.** The overlay's own measurements were right there
 and did not match the report: `combined_overlay.png` is weighted to the **right** (60-67 added
@@ -2909,7 +3357,7 @@ A left-weighted symptom needs a left-weighted layer.
 
 ---
 
-## 32. Hub category row no longer dims the artwork
+## 33. Hub category row no longer dims the artwork
 
 **Key file:** `1080i/Includes_Hubs.xml`
 
@@ -2977,7 +3425,7 @@ uncommenting one line, and a lighter dim is `main_bg_30` (`4d000000`, ~30% of th
 
 ### How it was actually found
 
-Three wrong diagnoses preceded this (sections 31b, and the 1.0.12 attempt above). What settled it
+Three wrong diagnoses preceded this (sections 32b, and the 1.0.12 attempt above). What settled it
 was a **temporary debug build**, in the manner of section 28's diagnostic note: each candidate
 layer was given a distinct opaque `colordiffuse` — `Hub_Top_Bezier` red,
 `background/combined_overlay.png` green, `background/combined_flixart.png` blue,
@@ -2986,7 +3434,7 @@ block reading the live state, since Kodi never writes control text to `kodi.log`
 
 One screenshot resolved everything: the top-left wash came back **red**, no green appeared
 anywhere, `Background.ShowOverlay` was empty and `Exp_BackgroundArtwork_IsOverlay` was `no`
-(so section 31b's layer never draws on this screen), `Home.MenuStyle` was empty (not `Ribbon`),
+(so section 32b's layer never draws on this screen), `Home.MenuStyle` was empty (not `Ribbon`),
 and `Exp_HomeMenu_HasFocus=YES` with `Container300=FOCUS` — which is what exposed the 1.0.12 no-op.
 
 **This technique is cheap and should be reached for sooner.** Three releases were spent reasoning
@@ -3025,6 +3473,66 @@ stronger, since the disabled call site is a comment:
 
 ---
 
+## 34. Divergent 1.0.x and 1.1.x branches reconciled
+
+**No code was written for this release.** 1.1.3 is the union of two lines of development that had
+been running in parallel from a common ancestor at section 29 (v1.0.9), each unaware of the other.
+
+| Branch | Head | Sections it carried |
+|---|---|---|
+| Search | **1.1.2** | 30 — full QWERTY, search history, Options menu |
+| Fanart / dimming | **1.0.14** | 31, 32, 33 — fanart edge fade, one diffuse for every style, top-bar dim removed |
+
+Neither package contained the other's work, and — exactly as in section 29 — **the changelog
+diverged with the code**, so each package documented its own branch as the complete history. The
+1.1.2 changelog had no sections above 30; the 1.0.14 changelog had no Search section. Read on its
+own, each looked internally consistent.
+
+### How it was found
+
+A file-level diff of the two packages. The whole divergence is **thirteen files**, and they split
+cleanly along the two branches with **no file touched by both** — which is why the merge needed no
+conflict resolution.
+
+| Files | Branch | Direction |
+|---|---|---|
+| `Custom_1185_Search.xml`, `Includes_Search.xml`, `Includes_Keyboard.xml`, `Includes_Paths.xml`, `Includes_Items.xml`, `Includes_Expressions.xml`, `Includes_SkinSettings.xml`, `language/…/en_gb/strings.po` | Search (§30) | present in 1.1.2, absent from 1.0.14 |
+| `Includes_Hubs.xml`, `Includes_Background.xml`, `media/Textures.xbt` | Fanart / dimming (§31–33) | present in 1.0.14, absent from 1.1.2 |
+| `MOD_CHANGELOG.md`, `addon.xml` | both | reconciled here |
+
+The `Textures.xbt` case is worth recording because the bundle is opaque to a text diff: the two
+files differ by **48,700 bytes**, which is exactly the packed-payload delta section 31 records for
+`diffuse/flixart/flixart_new.png` (149,377 → 198,077). A size delta matching a documented payload
+change is sufficient identification; a full entry-by-entry parse is only needed when it does not.
+
+### What was renumbered
+
+The two branches both used the number 30. The fanart/dimming sections were renumbered **30 → 31**,
+**31 → 32**, **32 → 33**, and their internal cross-references moved with them — including the
+`31a`/`31b` sub-headers, which are now `32a`/`32b`. Two `SKINMOD:` comments in the source carried
+section numbers and were updated to match:
+
+* `Includes_Background.xml` — `MOD_CHANGELOG 31.` → `32.`
+* `Includes_Hubs.xml` — `MOD_CHANGELOG 33.` (was `32.`)
+
+**Anything citing the old numbers is citing the 1.0.14 changelog.** In particular, section 33's
+account of the failed 1.0.12 attempt refers to `32b`, not `31b`.
+
+### Version
+
+`addon.xml` `1.1.2` → **`1.1.3`**. Both branch heads are ancestors, and per the numeric
+per-component comparison in section 19, `1.1.3` is above `1.1.2` and far above `1.0.14`, so an
+install over either one is an upgrade. **A device sitting on 1.0.14 must not be left there** — it
+has the dimming fix but none of the Search work.
+
+### Why validation step 6 did not catch this
+
+Step 6 diffs a release against **the previous release on its own branch**. Both packages passed it:
+each contained exactly the files its own changelog accounted for. The failure is one level up — two
+branches, no common baseline to diff against. Step 7 below is the guard.
+
+---
+
 ## Validation performed after every change
 
 1. **XML well-formedness** across all files in `1080i/` (258 files at last count).
@@ -3042,6 +3550,11 @@ stronger, since the disabled call site is a comment:
 6. **Manifest diff against the previous release** — every file that differs must be accounted for by
    a changelog section in this release. Added in 1.0.9 after the section 29 regression, which was
    valid XML and therefore passed steps 1-5.
+7. **Single-lineage check** — the version in `addon.xml` must be a direct descendant of the
+   previous package's version, and the changelog must contain every section the previous package
+   had. If two packages exist whose highest section numbers collide (two different section 30s),
+   they are branches and must be reconciled before either ships. Added in 1.1.3 after the section
+   34 divergence, which passed steps 1-6 on both branches independently.
 
 ---
 
@@ -3053,9 +3566,9 @@ stronger, since the disabled call site is a comment:
 | Combine Widgets un-shift | `Hub_Slide_Widgets_OnCombined` (`time` param) | `-hub_widgets_shift_y`, instant |
 | Row view vertical position | `view_row_shifted`, `view_row_hitrect_y_shifted` | 650 / 726 |
 | Fanart panel size | `flixart_size_w` / `_h` (base = Medium) | 1689 x 950 |
-| Fanart edge fade | single mask `diffuse/flixart/flixart.png` for every style — see 30, 31a | left + bottom only |
+| Fanart edge fade | single mask `diffuse/flixart/flixart.png` for every style — see 31, 32a | left + bottom only |
 | Menu dimming wash | `background/combined_overlay.png` via `Background.ShowOverlay` — nine setters, none in the home menu | unchanged |
-| Hub top gradient | `Hub_Top_Bezier` — call site in `Hub_Controls` commented out; `main_bg_70`/`main_bg_30`/`main_bg_12` for a lighter dim — see 32 | off |
+| Hub top gradient | `Hub_Top_Bezier` — call site in `Hub_Controls` commented out; `main_bg_70`/`main_bg_30`/`main_bg_12` for a lighter dim — see 33 | off |
 | Wall grid vertical position | `wall_top` / `wall_bottom` (horizontal: do not set) | 0 / 0 |
 | Wall row pitch | `view_poster_itemlayout_h` — shared, moves row views too | 350 |
 | Default widget view | `widgets_row.xml` fallback rule | `List_Poster_Row` |
@@ -3066,6 +3579,12 @@ stronger, since the disabled call site is a comment:
 | Wall fanart on/off | `Background.DisableWallFanart` → `Exp_BackgroundArtwork_WallIsDisabled` | off (fanart shown) |
 | Aspect ratio pill on/off | `Infoline.DisableAspect` (inverted sense) | on |
 | Match OSD to content on/off | `OSD.MatchToContent` (positive sense) | off |
+| Auto-open QWERTY on Search | `AlarmClock(SearchAutoKeyboard,...)` in `Custom_1185_Search.xml` | 1s (00:00 does not fire) |
+| Up out of results target | `onup` param on `Recommendations_Widgets_Grouplist` | 9095 |
+| Checkmark to results delay | `AlarmClock(SearchDismissPanel,...)` on keyboard control 300 | 1s |
+| Checkmark to results retry | `AlarmClock(SearchDismissPanelRetry,...)` on keyboard control 300 | 3s |
+| Search window default focus | `focusid` param in `Custom_1185_Search.xml` | 9090 |
+| Discover panel icon row width | `9994` `<width>` in `Search_Panel_Keyboard` (60px per button) | 300 |
 | OSD inset per aspect ratio | bucket tables in `Animation_OSD_MatchContent_Bottom` / `_Top` / `_Dim` | 21-192px |
 
 10.8px = 1% of screen height. Remember to update `-name` negative twins.

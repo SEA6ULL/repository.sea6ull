@@ -28,8 +28,13 @@
                 <control type="group">
                     <animation effect="slide" start="0" end="0,440" condition="!String.IsEmpty(Container(5099).ListItem.Property(guid))">Conditional</animation>
                     <include content="Recommendations_Widgets_Grouplist">
-                        <param name="onup">9090</param>
-                        <param name="ondown">9090</param>
+                        <!-- SKINMOD: was 9090 (the side panel's grouplist), i.e. Up out of the top
+                             widget row opened the small panel. The panel is gone from this window,
+                             so Up goes straight to 9095 and re-opens the keyboard. Down was 9090
+                             too; with no panel below there is nowhere to go, so it is now inert
+                             rather than dropping focus into an invisible control. -->
+                        <param name="onup">9095</param>
+                        <param name="ondown">noop</param>
                         <param name="widget_windowchange_animation">false</param>
                         <include>skinvariables-searchmenu-widgets</include>
                         <include>Widget_End_Bumper</include>
@@ -68,9 +73,94 @@
             <visible>!$EXP[Exp_InfoDialogs]</visible>
             <include>Furniture_Bottom_Right</include>
         </control>
-        <include>Search_Panel</include>
+        <include>Search_Keyboard_Controls</include>
 
         <include>View_Dialog_Plot</include>
+    </include>
+
+    <!-- SKINMOD: replaces Search_Panel in window 1185. The side panel is gone from Search; the
+         full keyboard IS the search UI now. Only the parts that other things depend on survive,
+         and all of them are offscreen.
+
+         Search_Panel itself is untouched and still used by Discover (1105), which is filter-led
+         and genuinely needs its panel.
+
+         Control ids are chosen to match what the rest of the skin already points at:
+           9099 - the edit control. NOT optional. Around seventy references across
+                  Includes_Paths, Includes_Labels, Includes_Search and the widget generator read
+                  Control.GetLabel(9099): Path_SearchTerm, the double-encoder containers that
+                  build every widget path, the results group's visibility, the no-results text,
+                  and the history write on unload. Kodi's keyboard is opened BY this control and
+                  writes back INTO it, so it has to exist and be focusable - just not visible.
+           9090 - was the panel's grouplist id. Reused here for the idle/parking button so the
+                  stale menuid references in the generated widget rows still resolve to something
+                  real instead of logging a missing control every time.
+           9095 - opens the keyboard and routes focus afterwards.
+           5099 - the category list, kept ONLY because the widget rows and info panel read
+                  Container(5099).ListItem.Property(guid) to decide what to show. Item 0 is
+                  Kodi's "All" ($LOCALIZE[593]) and nothing ever focuses it, so it sits on All
+                  forever, which is what "search everything" means. It is deliberately NOT inside
+                  a hidden group: a container that never becomes visible may never load its
+                  content, and an unloaded 5099 would mean an empty guid for the wrong reason.
+                  Its own Animation_ConditionalFade already fades it out whenever it is unfocused,
+                  which is always. -->
+    <include name="Search_Keyboard_Controls">
+        <control type="group">
+            <include>Dimension_DialogSideMenu</include>
+            <include>Search_View_Selector</include>
+        </control>
+
+        <!-- Offscreen rather than font-less. Object_Hidden_Button blanks its font with <font />,
+             which is fine for a button, but an edit control needs a real font to construct its
+             text layout - so this keeps the original font from Search_Panel_Edit and simply
+             parks the control off the side of the screen. Still focusable, which is what
+             Action(Select) needs to open the keyboard. -->
+        <control type="edit" id="9099">
+            <include>Object_Hidden_Item_Definition</include>
+            <font>font_midi_bold</font>
+            <!-- Doubles as the idle control after the keyboard is cancelled, so it needs usable
+                 navigation: Down to the results, Enter re-opens the keyboard by itself because
+                 that is what Select on an edit control does. Back falls through to closing the
+                 window, which is Kodi's default. -->
+            <ondown>5000</ondown>
+            <onup>noop</onup>
+            <onleft>noop</onleft>
+            <onright>noop</onright>
+            <onfocus>ClearProperty(Background.ShowOverlay,Home)</onfocus>
+        </control>
+
+        <!-- Idle/parking focus, and where the window sits before the keyboard opens. Nothing is
+             visible here, so the only things that must work are Back (falls through to closing
+             the window, Kodi's default), OK/Up (open the keyboard) and Down (reach the results).
+             After a search returns nothing, focus ends up on 9099 rather than here, which offers
+             the same three moves - see the note on 9095. -->
+        <include content="Object_Hidden_Button">
+            <param name="id">9090</param>
+            <onclick>SetFocus(9095)</onclick>
+            <onup>9095</onup>
+            <ondown>5000</ondown>
+            <onleft>noop</onleft>
+            <onright>noop</onright>
+        </include>
+
+        <!-- Opens the keyboard. That is ALL it does, and the restraint is deliberate.
+             Action(Select) blocks until the keyboard closes ONLY when this chain is entered from
+             a real user action. Entered from an AlarmClock - which is how window entry triggers
+             it - the builtin runs on the alarm thread, the action is posted rather than executed,
+             and every line after it runs IMMEDIATELY, while the keyboard is still opening.
+             That broke entry twice over: a PreviousMenu here closed the keyboard the instant it
+             appeared (a split-second flash), and any SetFocus here would move focus off 9099
+             before the posted Select reached it, so the keyboard would never open at all.
+             So nothing follows Action(Select). Post-keyboard focus is handled where it can be
+             done safely: control 300's alarms in Includes_Keyboard.xml move focus to the results
+             after Done. On Cancel or Back, focus is simply left on 9099, which is a perfectly
+             good idle spot - Enter re-opens the keyboard (native edit control behaviour), Down
+             reaches the results, and Back leaves Search. -->
+        <include content="Object_Hidden_Button">
+            <param name="id">9095</param>
+            <onfocus>SetFocus(9099)</onfocus>
+            <onfocus>Action(Select)</onfocus>
+        </include>
     </include>
 
     <include name="Search_View_Selector">
@@ -254,26 +344,34 @@
     </include>
 
 
+    <!-- SKINMOD: parameterised because 1185 and 1105 no longer share a layout. Discover still has
+         the side panel and keeps focusid 9992 (its letter grid); Search has no panel at all and
+         passes 9090, the offscreen idle button. The default reproduces the original behaviour
+         exactly, so Discover's window file needs no change. Search's auto-open onload lives in
+         Custom_1185_Search.xml, not here - see the comment there for why the ordering matters. -->
     <include name="Search_Window_Def">
-        <defaultcontrol>9992</defaultcontrol>
-        <menucontrol>9992</menucontrol>
+        <param name="focusid">9992</param>
+        <definition>
+        <defaultcontrol>$PARAM[focusid]</defaultcontrol>
+        <menucontrol>$PARAM[focusid]</menucontrol>
         <include>Action_Blur_Onload</include>
 
-        <onload condition="String.IsEmpty(Window(Home).Property(CustomSearchTerm)) + !Window.Previous(MyVideoNav.xml)">SetFocus(9992,0,absolute)</onload>
+        <onload condition="String.IsEmpty(Window(Home).Property(CustomSearchTerm)) + !Window.Previous(MyVideoNav.xml)">SetFocus($PARAM[focusid],0,absolute)</onload>
 
         <onload condition="!String.IsEmpty(Window(Home).Property(CustomSearchTerm))">SetFocus(9099)</onload>
         <onload condition="!String.IsEmpty(Window(Home).Property(CustomSearchTerm)) + Window.IsVisible(1105)">AlarmClock(refocus,RunScript(script.skinvariables,set_editcontrol=9099,window_id=1105,setfocus=9992,text=$INFO[Window(Home).Property(CustomSearchTerm)]),00:01,silent)</onload>
-        <onload condition="!String.IsEmpty(Window(Home).Property(CustomSearchTerm)) + Window.IsVisible(1185)">AlarmClock(refocus,RunScript(script.skinvariables,set_editcontrol=9099,window_id=1185,setfocus=9992,text=$INFO[Window(Home).Property(CustomSearchTerm)]),00:01,silent)</onload>
+        <onload condition="!String.IsEmpty(Window(Home).Property(CustomSearchTerm)) + Window.IsVisible(1185)">AlarmClock(refocus,RunScript(script.skinvariables,set_editcontrol=9099,window_id=1185,setfocus=$PARAM[focusid],text=$INFO[Window(Home).Property(CustomSearchTerm)]),00:01,silent)</onload>
         <onload>ClearProperty(CustomSearchTerm,Home)</onload>
 
         <!-- <onload condition="$EXP[Exp_FullPanelWindows_Prev] + String.IsEmpty(Window(Home).Property(CustomSearchTerm)) + !Window.Previous(1185) + !Window.Previous(1105)">SetFocus(9992)</onload>
         <onload condition="$EXP[Exp_FullPanelWindows_Prev] + String.IsEmpty(Window(Home).Property(CustomSearchTerm)) + [Window.Previous(1185) | Window.Previous(1105)]">SetFocus(9994,0,absolute)</onload>
         <onload condition="!String.IsEmpty(Window(Home).Property(CustomSearchTerm))">SetFocus(9099)</onload>
         <onload condition="!String.IsEmpty(Window(Home).Property(CustomSearchTerm)) + Window.IsVisible(1105)">AlarmClock(refocus,RunScript(script.skinvariables,set_editcontrol=9099,window_id=1105,setfocus=9992,text=$INFO[Window(Home).Property(CustomSearchTerm)]),00:01,silent)</onload>
-        <onload condition="!String.IsEmpty(Window(Home).Property(CustomSearchTerm)) + Window.IsVisible(1185)">AlarmClock(refocus,RunScript(script.skinvariables,set_editcontrol=9099,window_id=1185,setfocus=9992,text=$INFO[Window(Home).Property(CustomSearchTerm)]),00:01,silent)</onload>
+        <onload condition="!String.IsEmpty(Window(Home).Property(CustomSearchTerm)) + Window.IsVisible(1185)">AlarmClock(refocus,RunScript(script.skinvariables,set_editcontrol=9099,window_id=1185,setfocus=$PARAM[focusid],text=$INFO[Window(Home).Property(CustomSearchTerm)]),00:01,silent)</onload>
         <onload>ClearProperty(CustomSearchTerm,Home)</onload> -->
 
         <onunload condition="!String.IsEmpty(Control.GetLabel(9099).index(1))">RunScript(script.skinvariables,add_skinstring_history=SearchHistory,value=$VAR[Path_SearchTerm])</onunload>
+        </definition>
     </include>
 
     <include name="Search_Panel_Edit">
@@ -554,7 +652,11 @@
             <onright>5000</onright>
             <onleft>noop</onleft>
             <top>-10</top>
-            <width>240</width>
+            <!-- SKINMOD: 240 -> 300. This is a fixed-width horizontal panel of 60px slots and
+                 four items are visible at a time (Discover/Search swap by window). The added
+                 Clear Search History button makes five, so the row needs one more slot or the
+                 last icon is clipped. 5 x 60 = 300. -->
+            <width>300</width>
             <height>60</height>
             <centerleft>50%</centerleft>
             <onfocus>ClearProperty(Background.ShowOverlay,Home)</onfocus>
@@ -638,6 +740,20 @@
                     <onclick condition="Window.Isvisible(1105)">SetProperty(TMDbHelper.UserDiscover.Folderpath.ParamString,tmdb_type=movie,Home)</onclick>
                     <include>Search_Panel_UpdateSearchRows_Onclick</include>
                 </item>
+
+                <!-- SKINMOD: clear the stored search history without leaving the search screen.
+                     f1da is clock-rotate-left; it is the only history-flavoured glyph in
+                     fa-solid-900.ttf and does not read as "clear the text box", which is what
+                     the f071 button above it already means. Confirmed with a yes/no because a
+                     misfire on a five-button row would wipe the history with no undo.
+                     Search_Panel_UpdateSearchRows_Onclick is deliberately NOT included here:
+                     clearing history does not change the search term, so the result rows must
+                     not be poked. -->
+                <item>
+                    <description>Clear Search History</description>
+                    <label>&#xf1da;</label>
+                    <onclick>RunScript(script.skinvariables,run_dialog=yesno,"heading=$LOCALIZE[31609]","message=$LOCALIZE[31610]",yeslabel=$LOCALIZE[31611],nolabel=$LOCALIZE[222],"executebuiltin=Skin.Reset(SearchHistory)")</onclick>
+                </item>
             </content>
         </control>
     </include>
@@ -662,7 +778,11 @@
             <right>80</right>
 
             <onclick>SetFocus(9099)</onclick>
-            <onclick>RunScript(script.skinvariables,set_editcontrol=9099,window_id=1105,setfocus=9993,text=$INFO[Container(9993).ListItem.Label])</onclick>
+            <!-- SKINMOD: window_id was hardcoded to 1105, but this include is only ever compiled
+                 into window 1185 (see the conditional include in Search_Panel). The script was
+                 therefore writing the term into a window that was not on screen, so clicking a
+                 history entry or a suggestion in the side panel silently did nothing. -->
+            <onclick>RunScript(script.skinvariables,set_editcontrol=9099,window_id=1185,setfocus=9993,text=$INFO[Container(9993).ListItem.Label])</onclick>
             <include>Search_Panel_UpdateSearchRows_Onclick</include>
 
             <itemlayout height="60">
@@ -858,7 +978,6 @@
                 <texture colordiffuse="$VAR[Color_DialogBorder]">common/white.png</texture>
             </control>
 
-            <include condition="Window.IsVisible(1185)">Search_View_Selector</include>
 
         </control>
     </include>

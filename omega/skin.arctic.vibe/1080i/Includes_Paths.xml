@@ -17,6 +17,19 @@
         <value>plugin://script.skinvariables/?info=get_split_string&amp;infolabel=Skin.String(SearchHistory)&amp;reload=$INFO[Skin.String(SearchHistory)]</value>
     </variable>
 
+    <!-- SKINMOD: content for the suggestion grid (control 3) in the full QWERTY keyboard.
+         Upstream hardcoded the autocompletion path, so the grid sat empty until you typed.
+         Value 1 is that original path, unchanged, for once there is text in the edit control.
+         Value 2 fills the empty state with the stored search history, but ONLY inside the two
+         search windows (1185 Search / 1105 Discover) so the keyboard stays clean when it is
+         being used to rename a file or type a network path, and only when the autocompletion
+         add-on is installed, because that add-on provides the click route for the entries.
+         Control 312 is the keyboard dialog's own edit control. -->
+    <variable name="Path_Keyboard_Suggestions">
+        <value condition="$EXP[Exp_AutoCompletion_IsEnabled] + !String.IsEmpty(Control.GetLabel(312).index(1))">plugin://plugin.program.autocompletion?info=autocomplete&amp;&amp;id=$INFO[Control.GetLabel(312).index(1)]</value>
+        <value condition="$EXP[Exp_AutoCompletion_IsInstalled] + [Window.IsVisible(1185) | Window.IsVisible(1105)] + String.IsEmpty(Control.GetLabel(312).index(1))">plugin://script.skinvariables/?info=get_split_string&amp;infolabel=Skin.String(SearchHistory)&amp;reload=$INFO[Skin.String(SearchHistory)]</value>
+    </variable>
+
     <variable name="Path_SkinVariables_1304_EditMode">
         <value condition="!String.EndsWith(Container(304).ListItem.Property(menu),-widgetsonly) + !String.EndsWith(Container(304).ListItem.Property(menu),-globalwidgets)">$INFO[Container(304).ListItem.Property(mode),mode=,]</value>
     </variable>

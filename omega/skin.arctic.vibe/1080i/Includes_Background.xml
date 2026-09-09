@@ -76,7 +76,7 @@
                  (<param name="diffuse">diffuse/flixart/flixart_new.png</param>) is deliberately
                  gone, so this call inherits Background_FlixArt's default mask, flixart.png.
                  Simple and Blur now resolve to the SAME diffuse and cannot drift apart again.
-                 Do not re-add a diffuse param here. MOD_CHANGELOG 31. -->
+                 Do not re-add a diffuse param here. MOD_CHANGELOG 32. -->
             <include content="Background_FlixArt" condition="Skin.String(Background.ArtworkStyle,Simple)">
                 <param name="fadetime">$PARAM[fadetime]</param>
             </include>

@@ -315,7 +315,7 @@
                  Removing the call site is the only way to remove it. The definition above is
                  left untouched; uncomment the line above to restore. For a lighter dim instead,
                  restore the line and change main_bg_70 to main_bg_30 or main_bg_12 in the
-                 definition. MOD_CHANGELOG 32. -->
+                 definition. MOD_CHANGELOG 33. -->
 
             <control type="group">
                 <include condition="$PARAM[is_homemenu]">Hub_Menu_Slide</include>
