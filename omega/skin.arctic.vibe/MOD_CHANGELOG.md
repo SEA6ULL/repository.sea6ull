@@ -1,6 +1,6 @@
 # Arctic Vibe — Mod Changelog
 
-Ships as **Arctic Vibe** (`skin.arctic.vibe`, v1.1.4) by sea6ull.
+Ships as **Arctic Vibe** (`skin.arctic.vibe`, v1.1.5) by sea6ull.
 A modified fork of **Arctic Fuse 2** (`skin.arctic.fuse.2`, v2.12.12) by jurialmunkey.
 
 This document records every change made to the upstream skin, and — where it matters —
@@ -3638,6 +3638,117 @@ false for edit controls, and the belief that produced the bug.
 
 ---
 
+## 36. Player Process Info reachable from the OSD (video and music)
+
+Player Process Info had exactly one entry point in the skin, and it was three levels deep:
+focus OSD button 8 (video settings) → that `onfocus` opens `Custom_1148_OSD_VideoStreams.xml`
+→ inside it, the unlabelled `Settings_Button` (control 6805) carries
+`<onclick>Action(PlayerProcessInfo)</onclick>`. Nothing in the music OSD reached it at all.
+
+A ninth OSD button was added, sitting **immediately left of the settings button** in both
+`VideoOSD.xml` and `MusicOSD.xml`. Control id `6009`, icon overlay group `6109`,
+icon `extras/icons/bars-progress.png` (already the dialog's own header icon).
+
+### The trap: `Action(PlayerProcessInfo)` is video-only
+
+The obvious move is to copy the builtin the skin already uses. It does not work for music, and it
+fails **silently** — no error, no log line, the button just does nothing.
+
+Traced through Kodi source, `ACTION_PLAYER_PROCESS_INFO` is handled in exactly one place:
+
+* `xbmc/cores/VideoPlayer/VideoPlayer.cpp` — `CVideoPlayer::OnAction` catches it and fires
+  `Announce(Player, "OnProcessInfo")`.
+* `xbmc/guilib/handlers/player/GUIPlayerAnnouncementHandler.cpp` receives that announcement and
+  posts `TMSG_GUI_ACTIVATE_WINDOW` for `WINDOW_DIALOG_PLAYER_PROCESS_INFO`.
+
+So the action never opens the window itself — it only asks the *player* to ask for it. Music plays
+through **PAPlayer**, which does not override `OnAction` at all; the base `IPlayer::OnAction`
+returns `false`. The chain never starts.
+
+**What is used instead:** `ActivateWindow(playerprocessinfo)`. `xbmc/input/WindowTranslator.cpp`
+maps the name `playerprocessinfo` straight to window id **10116**, bypassing the player entirely.
+Works for both video and music. Both new buttons use it.
+
+> Do not "simplify" these buttons back to `Action(PlayerProcessInfo)` to match control 6805.
+> 6805 lives in a video-only dialog, so it gets away with it. The music button would not.
+
+### The second trap: the button row is drawn twice
+
+Every OSD side panel (`1143`, `1145`, `1146`, `1147`, `1148`) redraws the **entire** eight-button
+row itself, via `OSD_CustomDialog_GroupList` in `Includes_OSD.xml`. Each panel passes
+`button_N=true` for its own slot; that one renders as a real focusable button
+(`OSD_CustomDialog_RealButton`), and every other slot renders as an invisible 80px spacer
+(`OSD_CustomDialog_FakeButton`) whose `onfocus` is `Close` + `SetFocus(600N)` — which is the
+mechanism that hands focus back to the real OSD when you navigate off the panel's own button.
+
+Consequence: adding a button to `VideoOSD.xml` / `MusicOSD.xml` alone is **not enough**. With a
+panel open the row would render only eight slots, so the new button would visibly vanish and
+left/right navigation would skip straight past it.
+
+A ninth slot was therefore added to `OSD_CustomDialog_GroupList`, **emitted between slots 7 and 8**
+so the redrawn order matches the real rows. Slot ids are positional, not numeric — `600$PARAM[id]`
+and `610$PARAM[id]` expand to `6009` / `6109` with no further plumbing.
+
+### Layout note — video has no shuffle button
+
+The request was "between the settings button and the shuffle button". That pairing only exists in
+`MusicOSD.xml`, whose right-hand row is lyrics (6005), repeat (6006), shuffle (6007),
+settings (6008). `VideoOSD.xml` has no shuffle: its row is info (6005), audio (6006),
+subtitles (6007), video settings (6008).
+
+The button was placed **immediately left of slot 8 in both**, which is literally "between shuffle
+and settings" in music and the same screen position in video. If video ever gains a shuffle button,
+revisit this.
+
+### Music OSD did not hide behind the dialog
+
+`VideoOSD.xml` already carried `<visible>!Window.IsActive(DialogPlayerProcessInfo.xml)</visible>`
+(as do `1143`, `1145`, `1146`, `1147`, `1148`, `1153` and `DialogSeekBar.xml`). `MusicOSD.xml` did
+not — it had never needed to, because nothing could open that dialog from the music OSD. Added,
+with `allowhiddenfocus="true"` to match the sibling `<visible>` already on that group.
+
+### The dialog itself was near-empty during music
+
+`PAPlayer` constructs a `CProcessInfo` and wires it to the data cache, but never populates it —
+no `SetAudioDecoderName` / samplerate / channels calls exist in `PAPlayer.cpp`. So every
+`$INFO[Player.Process(...)]` infolabel is blank during music playback, and the six blocks gated on
+`!VideoPlayer.Content(livetv)` would have rendered as bold headings over nothing: Video decoder,
+Pixel format, HDR | Deinterlace, Video (resolution), Audio.
+
+Rather than ship a button that opens a blank screen:
+
+* Five blocks re-gated from `!VideoPlayer.Content(livetv)` to
+  `!VideoPlayer.Content(livetv) + Player.HasVideo`. Video and live TV behaviour is unchanged.
+* The System block (memory / CPU) is left ungated — it is valid for both.
+* A **new music Audio block** added, gated `Player.HasAudio + !Player.HasVideo`, using
+  `MusicPlayer.Codec` / `BitsPerSample` / `SampleRate` / `BitRate` / `Channels`. These are served by
+  `MusicGUIInfo.cpp` from `m_audioInfo` via the data cache and **do** populate under PAPlayer.
+  It reuses `$LOCALIZE[460]` ("Audio") and the same label grammar as the video block.
+* The bottom `OSD_Codecs` strip reads `VideoPlayer.*` only, so during music it rendered an empty
+  info circle showing just its fallback role. Gated on `Player.HasVideo`.
+
+### Files touched
+
+| File | Change |
+|---|---|
+| `1080i/VideoOSD.xml` | button `6009` inserted before button `6008` |
+| `1080i/MusicOSD.xml` | button `6009` inserted between `6007` and `6008`; OSD hidden behind the dialog |
+| `1080i/Includes_OSD.xml` | `button_9` param + slot 9 emitted between slots 7 and 8 |
+| `1080i/DialogPlayerProcessInfo.xml` | five blocks gated on `Player.HasVideo`; new music Audio block; `OSD_Codecs` strip gated |
+
+### Left deliberately in place
+
+Control `6805` in `Custom_1148_OSD_VideoStreams.xml` keeps its `Action(PlayerProcessInfo)` and its
+codec-readout overlay (`6895`). It is a working video-only path inside a video-only dialog, and the
+overlay is a genuine second feature. Removing it would be churn with no gain.
+
+`Skin.HasSetting` was **not** added to gate the new button. Every other button in both rows is
+unconditional, and a settings toggle would need a matching condition on slot 9 of
+`OSD_CustomDialog_GroupList` or the row would desynchronise between the OSD and the panels —
+the exact failure described above. If it is ever wanted, both places must change together.
+
+---
+
 ## Validation performed after every change
 
 1. **XML well-formedness** across all files in `1080i/` (258 files at last count).
@@ -3692,5 +3803,6 @@ false for edit controls, and the belief that produced the bug.
 | Search window default focus | `focusid` param in `Custom_1185_Search.xml` | 9090 |
 | Discover panel icon row width | `9994` `<width>` in `Search_Panel_Keyboard` (60px per button) | 300 |
 | OSD inset per aspect ratio | bucket tables in `Animation_OSD_MatchContent_Bottom` / `_Top` / `_Dim` | 21-192px |
+| Player Process Info button | control `6009` in `VideoOSD.xml` / `MusicOSD.xml` **and** slot 9 in `OSD_CustomDialog_GroupList` — change both or the row desyncs — see 36 | left of settings |
 
 10.8px = 1% of screen height. Remember to update `-name` negative twins.

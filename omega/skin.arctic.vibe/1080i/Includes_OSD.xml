@@ -1248,6 +1248,7 @@
         <param name="button_5">false</param>
         <param name="button_6">false</param>
         <param name="button_7">false</param>
+        <param name="button_9">false</param>  <!-- SKINMOD: slot 9 renders BETWEEN 7 and 8 - see definition below -->
         <param name="button_8">false</param>
         <param name="iconoffset_condition">false</param>
         <definition>
@@ -1365,6 +1366,24 @@
                 </include>
                 <include content="OSD_CustomDialog_RealButton" condition="$PARAM[button_7]">
                     <param name="id">7</param>
+                    <param name="onclick">$PARAM[onclick]</param>
+                    <param name="onclick_condition">$PARAM[onclick_condition]</param>
+                    <param name="onup">$PARAM[onup]</param>
+                    <param name="onup_02">$PARAM[onup_02]</param>
+                    <param name="icon">$PARAM[icon]</param>
+                    <param name="label">$PARAM[label]</param>
+                    <param name="iconoffset_condition">$PARAM[iconoffset_condition]</param>
+                </include>
+
+                <!-- SKINMOD: slot 9 (Player Process Info) is emitted here, between slots 7 and 8,
+                     to mirror the real button order in VideoOSD.xml / MusicOSD.xml. If this is
+                     removed, the button row visibly loses a button whenever an OSD side panel
+                     (1143/1145/1146/1147/1148) is open, and left/right navigation skips it. -->
+                <include content="OSD_CustomDialog_FakeButton" condition="![$PARAM[button_9]]">
+                    <param name="id">9</param>
+                </include>
+                <include content="OSD_CustomDialog_RealButton" condition="$PARAM[button_9]">
+                    <param name="id">9</param>
                     <param name="onclick">$PARAM[onclick]</param>
                     <param name="onclick_condition">$PARAM[onclick_condition]</param>
                     <param name="onup">$PARAM[onup]</param>

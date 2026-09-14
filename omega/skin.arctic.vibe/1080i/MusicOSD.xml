@@ -12,6 +12,10 @@
         <control type="group">
 
             <visible allowhiddenfocus="true">!Window.IsVisible(1142)</visible>
+            <!-- SKINMOD: hide the music OSD behind the Player Process Info dialog.
+                 VideoOSD.xml already did this; MusicOSD did not, because nothing
+                 could open that dialog from the music OSD until now. -->
+            <visible allowhiddenfocus="true">!Window.IsActive(DialogPlayerProcessInfo.xml)</visible>
             <animation effect="fade" start="0" end="100" time="300" delay="0">Visible</animation>
             <animation effect="fade" end="0" start="100" time="150">Hidden</animation>
 
@@ -158,6 +162,22 @@
                         <param name="icon">$VAR[Image_OSD_Shuffle]</param>
                         <param name="id">6007</param>
                         <param name="groupid">6107</param>
+                        <param name="itemgap">osd_itemgap</param>
+                    </include>
+
+                    <!-- SKINMOD: Button 9 - Player Process Info.
+                         Sits between Shuffle (slot 7) and Settings (slot 8), as requested.
+                         onfocus mirrors its siblings so the artist-details panel keeps its state. -->
+                    <control type="button" id="6009">
+                        <include>Defs_OSD_Button</include>
+                        <onclick>CancelAlarm(osd_timeout,true)</onclick>
+                        <onclick>ActivateWindow(playerprocessinfo)</onclick>
+                        <onfocus>SetProperty(OSDArtistDetails,1,Home)</onfocus>
+                    </control>
+                    <include content="OSD_Button_Icon_Overlay">
+                        <param name="icon">special://skin/extras/icons/bars-progress.png</param>
+                        <param name="id">6009</param>
+                        <param name="groupid">6109</param>
                         <param name="itemgap">osd_itemgap</param>
                     </include>
 
