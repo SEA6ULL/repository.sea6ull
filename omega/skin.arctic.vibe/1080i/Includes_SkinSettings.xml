@@ -813,6 +813,25 @@
             <selected>Skin.HasSetting(SkinUserLogin.StartupLoginScreen)</selected>
             <visible>!Skin.HasSetting(SkinUserLogin.Disabled)</visible>
         </include>
+        <!-- SKINMOD: "Initial focus (Widgets)". Off by default (unset = focus the category row,
+             which is the stock behaviour). reload=true is required, not cosmetic: the setting is
+             consumed by an <include condition> in Action_Hubs_Onload and Kodi only evaluates
+             those when a window is loaded, so without the ReloadSkin() the toggle would appear
+             to do nothing. id 015 is a free slot in this section's 001-025 range - 010 onwards
+             is the Holiday Theme block and renumbering it would churn control ids for no gain.
+             See MOD_CHANGELOG 37. -->
+        <include content="Settings_Button" description="Initial focus widgets">
+            <param name="dialog">false</param>
+            <param name="window">skinsettings</param>
+            <param name="baseid">$PARAM[baseid]</param>
+            <param name="id">015</param>
+            <param name="control">radiobutton</param>
+            <param name="reload">true</param>
+            <param name="slevel">2</param>
+            <label>$LOCALIZE[31144] ($LOCALIZE[31103])</label>
+            <onclick>Skin.ToggleSetting(Startup.InitialFocusWidgets)</onclick>
+            <selected>Skin.HasSetting(Startup.InitialFocusWidgets)</selected>
+        </include>
 
         <include content="Settings_Label" description="Holiday Theme">
             <param name="window">skinsettings</param>

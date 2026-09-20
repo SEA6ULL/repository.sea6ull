@@ -1,6 +1,6 @@
 # Arctic Vibe — Mod Changelog
 
-Ships as **Arctic Vibe** (`skin.arctic.vibe`, v1.1.5) by sea6ull.
+Ships as **Arctic Vibe** (`skin.arctic.vibe`, v1.1.6) by sea6ull.
 A modified fork of **Arctic Fuse 2** (`skin.arctic.fuse.2`, v2.12.12) by jurialmunkey.
 
 This document records every change made to the upstream skin, and — where it matters —
@@ -3749,6 +3749,165 @@ the exact failure described above. If it is ever wanted, both places must change
 
 ---
 
+## 37. New setting: Initial focus (Widgets) on the home screen
+
+**Settings → Skin Settings → Other → Startup → "Initial focus (Widgets)"**
+(`Skin.HasSetting(Startup.InitialFocusWidgets)`, id `6015`, settings level 2).
+
+Off by default — unset is the stock behaviour, where the home screen opens with focus on the
+category row (control `300`, whose first item is the Home button). Toggled on, the home screen
+opens with focus on the first widget row of the first category instead.
+
+This is the *initial* focus only. It does not force focus on every visit to Home: see 37c.
+
+### 37a. The feature already existed, for a layout this mod deleted
+
+`Action_Hubs_Onload` in `1080i/Includes_Actions.xml` already shipped a widgets-first switch:
+
+```xml
+<!-- Default Controls Home -->
+<include content="Object_DefaultControl" condition="[$PARAM[is_homemenu]] + !Skin.HasSetting(SideMenu.FocusWidgetsFirst)">
+    <param name="defaultcontrol">300</param>
+<include content="Object_DefaultControl" condition="[$PARAM[is_homemenu]] + Skin.HasSetting(SideMenu.FocusWidgetsFirst)">
+    <param name="defaultcontrol">400</param>
+```
+
+Both arms are gated on `is_homemenu`, which `Home.xml` passes as
+`Skin.HasSetting(Hub.Home.DisableSubmenu)` — the vertical sidemenu (Basic) layout. **Section 15b
+resets `Hub.Home.DisableSubmenu` on first run so Home always lands on Advanced**, which makes
+`is_homemenu` permanently false and both arms unreachable. Its settings entry (`Includes_Items.xml`
+id `8004`) carries `<visible>Skin.HasSetting(Hub.Home.DisableSubmenu)</visible>` and is therefore
+never drawn either.
+
+`SideMenu.FocusWidgetsFirst` was **left untouched**, and the new setting is a separate key.
+Reasons, in order of weight:
+
+1. It is also a term in `Exp_Navigation_OnWrap` (`Includes_Expressions.xml`). That expression is
+   `[![Exp_HomeHub_IsVisible + Skin.HasSetting(Hub.Home.DisableSubmenu)] | Skin.HasSetting(SideMenu.FocusWidgetsFirst) | Exp_InfoDialogs]`.
+   With `DisableSubmenu` constant-false the first term is already constant-**true**, so the whole
+   expression is true regardless — reusing the key would be inert *today*. But that is an accident
+   of 15b, not a design, and anything that later restores the Basic layout would silently pick up
+   a left/right wrap change from a setting named for startup focus.
+2. `Startup.*` is the naming convention of the section this setting lives in
+   (`Startup.WaitForLoad`, `Startup.WaitForLoad.DisableForHubs`,
+   `Startup.WaitForLoad.EnableForLibrary`).
+3. Skin settings survive a reinstall. A user who once had `SideMenu.FocusWidgetsFirst` set from an
+   Arctic Fuse install would otherwise inherit the new setting pre-enabled.
+
+**Do not "tidy up" by merging the two keys later.**
+
+### 37b. Control 400 is the widget grouplist on both paths
+
+The useful discovery is that the target control id does not change between layouts.
+`grouplist_id` is `400` in **both** generator stages:
+
+| Stage | Reached by | `grouplist_id` |
+|---|---|---|
+| `shortcuts/generator/data/base/home_widgets.xml` | classic Home (sidemenu) | `400` |
+| `shortcuts/generator/data/base/category_widgets.xml` | Advanced Home and hubs | `400` |
+
+So the Advanced path can reuse upstream's `defaultcontrol 400` verbatim. Focusing a grouplist
+focuses its first focusable child, which is the first `Widget_Row` — and the first category's rows
+are the visible ones at load, because `widgets_row.xmltemplate` gates each row on
+`String.IsEqual(Container(300).ListItem.Property(guid),{item_guid})` and `Container(300).ListItem`
+is the first category before anything is navigated.
+
+Note this is **not** the `100601` / `601` distinction documented in section 19. That is about
+*widget row* container ids, which are `grouplist_item_x * 1000 + 600 + enum_x` and do differ per
+path. The *grouplist* that contains them is 400 either way.
+
+### 37c. Why `always="false"` is kept
+
+`<defaultcontrol always="false">` means Kodi uses the default control only when it has no
+remembered control for the window — i.e. the first load after startup or a skin reload. On every
+later return to Home, `RestoreControlStates()` restores wherever you were.
+
+That is exactly the requested semantics ("initial focus"), and it is why this was implemented as a
+`defaultcontrol` branch rather than an `onload SetFocus(400)`. Window `onload` actions run on
+*every* activation of the window, after `RestoreControlStates()`, so an onload would have
+overridden the remembered position every single time you backed out to Home — a different and
+much more intrusive feature.
+
+### 37d. Why a param and not a bare `Skin.HasSetting` in the condition
+
+`Action_Hubs_Onload` is shared by Home and by all eight `Custom_11xx_Hub_*.xml` windows. Putting
+`Skin.HasSetting(Startup.InitialFocusWidgets)` directly into the default-control condition would
+have applied it to every hub, not just the home screen.
+
+Instead the include takes a new param, defaulting to the inert value:
+
+```xml
+<param name="initial_focus_widgets">False</param>
+```
+
+and `Home.xml` — and only `Home.xml` — passes
+`Skin.HasSetting(Startup.InitialFocusWidgets)`. It is passed on **all nine** call sites in that
+file: the plain home menu plus the eight `Hub.Home.ReplaceWindow` variants, because when Home is
+replaced by a hub, that hub *is* the home screen. The hub windows' own call sites in
+`Custom_1101..1109` leave the param at `False`, so navigating to a hub still lands on its
+category row.
+
+The `+ True` / `+ False` tails on the neighbouring branches are the section 1 Spotlight
+constant-folding residue and were left as-is.
+
+### 37e. `reload=true` is load-bearing, not cosmetic
+
+The setting is consumed by an `<include condition="...">`. Kodi evaluates include conditions when
+a **window is loaded**, not per frame, and Home is loaded at startup and stays resident. Toggling
+the setting at runtime would therefore appear to do nothing until the next Kodi restart.
+
+`Settings_Button_skinsettings` (`Includes_Settings.xml`) already solves this:
+
+```xml
+<onclick condition="$PARAM[reload]">ReloadSkin()</onclick>
+<onclick condition="$PARAM[reload]">AlarmClock(refocus1,SetFocus(10000,$PARAM[baseid]),00:00,silent)</onclick>
+<onclick condition="$PARAM[reload]">AlarmClock(refocus2,SetFocus($PARAM[baseid]$PARAM[id]),00:00,silent)</onclick>
+```
+
+so `<param name="reload">true</param>` reloads the skin and puts the user back on the same settings
+row. This is the same mechanism the Mouse Pointer Size button (id `6003`) two entries above uses.
+The `<nested/>` slot in `Settings_Button` sits above this include, so `Skin.ToggleSetting` fires
+before `ReloadSkin()`. **If this param is ever removed the setting silently stops working.**
+
+### 37f. Strings and the id slot
+
+No new string was added. The label is `$LOCALIZE[31144] ($LOCALIZE[31103])` → **"Initial focus
+(Widgets)"**, reusing upstream `#31144` *Initial focus* and `#31103` *Widgets*, both already
+translated in all fourteen language packs. The `Label ($LOCALIZE[...])` shape matches the
+neighbouring `$LOCALIZE[31506] ($LOCALIZE[31507])` entry in the same section. A dedicated
+`#31612` string would have shipped English-only into every non-English install for no gain.
+
+Control id `015` is a free slot in this section's `001`–`025` range. `010` onwards is the Holiday
+Theme block; inserting at `010` and renumbering would have churned five control ids for a purely
+cosmetic ordering gain. The grouplist renders in **XML order**, not id order, so the entry still
+appears at the bottom of the Startup block where it belongs.
+
+`slevel 2` matches the rest of the Startup block, including its `Settings_Label` header — a lower
+level would have made the row appear without its heading at settings level 1.
+
+### Files touched
+
+| File | Change |
+|---|---|
+| `1080i/Includes_Actions.xml` | `initial_focus_widgets` param (default `False`) + second default-control branch targeting `400` |
+| `1080i/Home.xml` | param passed on all nine `Action_Hubs_Onload` call sites |
+| `1080i/Includes_SkinSettings.xml` | radiobutton id `015` appended to the Startup block in `SkinSettings_Items_Other` |
+
+### Known edge
+
+If the first category's widget rows are still being fetched when Home first draws, control `400`
+may have no focusable child yet and Kodi falls back to the first focusable control in the window.
+This is the same exposure upstream's classic-layout path has always had, and it is what
+**"Hide widget initialisation behind splash"** (`Startup.WaitForLoad`, section 19) exists to cover —
+which is why this setting was placed directly beneath it in the same Startup block.
+
+Back navigation is unaffected: `Action_Widget_OnBack` fires
+`AlarmClock(refocus2,$VAR[Action_Hubs_Complex_SetFocus],...)` from the first item of a widget row,
+and that variable resolves to `SetFocus(300)`. Starting on the widgets does not strand the user
+away from the menu.
+
+---
+
 ## Validation performed after every change
 
 1. **XML well-formedness** across all files in `1080i/` (258 files at last count).
@@ -3804,5 +3963,6 @@ the exact failure described above. If it is ever wanted, both places must change
 | Discover panel icon row width | `9994` `<width>` in `Search_Panel_Keyboard` (60px per button) | 300 |
 | OSD inset per aspect ratio | bucket tables in `Animation_OSD_MatchContent_Bottom` / `_Top` / `_Dim` | 21-192px |
 | Player Process Info button | control `6009` in `VideoOSD.xml` / `MusicOSD.xml` **and** slot 9 in `OSD_CustomDialog_GroupList` — change both or the row desyncs — see 36 | left of settings |
+| Home initial focus | `Startup.InitialFocusWidgets` → `initial_focus_widgets` param in `Action_Hubs_Onload`; needs `reload=true` — see 37 | off (categories) |
 
 10.8px = 1% of screen height. Remember to update `-name` negative twins.

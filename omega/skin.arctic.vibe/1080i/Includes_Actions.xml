@@ -240,6 +240,10 @@
 
     <include name="Action_Hubs_Onload">
         <param name="is_homemenu">false</param>
+        <!-- SKINMOD: "Initial focus (Widgets)" - see MOD_CHANGELOG 37.
+             Only Home.xml passes this; every hub window leaves it at the default False so
+             hubs keep landing on their category row. -->
+        <param name="initial_focus_widgets">False</param>
         <definition>
             <include content="Generator_BuildViewTypes_Onload">
                 <param name="params">,no_reload</param>
@@ -272,8 +276,18 @@
                 <param name="defaultcontrol">400</param>
                 <param name="always">false</param>
             </include>
-            <include content="Object_DefaultControl" condition="![$PARAM[is_homemenu]] + !Skin.HasSetting(Hub.$PARAM[window_id].DisableSubmenu) + True">
+            <include content="Object_DefaultControl" condition="![$PARAM[is_homemenu]] + !Skin.HasSetting(Hub.$PARAM[window_id].DisableSubmenu) + ![$PARAM[initial_focus_widgets]] + True">
                 <param name="defaultcontrol">300</param>
+                <param name="always">false</param>
+            </include>
+            <!-- SKINMOD: "Initial focus (Widgets)". 400 is the widget grouplist on the Advanced
+                 path exactly as it is on the classic one (grouplist_id is 400 in both
+                 generator/data/base/category_widgets.xml and .../home_widgets.xml), so focusing
+                 it lands on the first widget row of the first category. always="false" is kept:
+                 this is the INITIAL focus only, Kodi still restores the remembered control when
+                 you come back to Home from elsewhere. See MOD_CHANGELOG 37. -->
+            <include content="Object_DefaultControl" condition="![$PARAM[is_homemenu]] + !Skin.HasSetting(Hub.$PARAM[window_id].DisableSubmenu) + [$PARAM[initial_focus_widgets]] + True">
+                <param name="defaultcontrol">400</param>
                 <param name="always">false</param>
             </include>
             <include content="Object_DefaultControl" condition="![$PARAM[is_homemenu]] + !Skin.HasSetting(Hub.$PARAM[window_id].DisableSubmenu) + False">
