@@ -1,0 +1,28 @@
+{
+    "sums": {
+        "attempts": ["{attempts}", "-1"]
+    },
+    "actions": [
+        {
+            "rules": [
+                "{attempts}!=0",
+                "Window.IsActive(Home)",
+                "[Control.HasFocus(300) | Control.HasFocus(308)]",
+                "[Container(601).IsUpdating | Container(100601).IsUpdating]"
+            ],
+            "value": [
+                "sleep=0.25",
+                "route=run_executebuiltin=special://skin/shortcuts/builtins/skinvariables-reloadrefocus.json&use_rules=True&attempts={attempts}"
+            ]
+        },
+        {
+            "rules": [
+                "Window.IsActive(Home)",
+                "[Control.HasFocus(300) | Control.HasFocus(308)]"
+            ],
+            "value": [
+                "SetFocus(400)"
+            ]
+        }
+    ]
+}

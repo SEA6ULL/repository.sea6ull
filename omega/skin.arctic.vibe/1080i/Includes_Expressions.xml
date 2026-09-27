@@ -75,6 +75,11 @@
     <expression name="Exp_IsWindow_TVShows">[Container.Content(tvshows) | Container.Content(seasons) | Container.Content(episodes) | String.StartsWith(Container.FolderPath,videodb://tvshows/) | String.StartsWith(Container.FolderPath,library://video/tvshows/) | Window.IsVisible(1130) | Window.IsVisible(1131)]</expression>
     <expression name="Exp_IsWindow_Music">[Window.IsVisible(MyMusicNav.xml) | Container.Content(musicvideos)]</expression>
 
+    <!-- SKINMOD: section 39. True while the first widget row of the first category has not
+         loaded yet - i.e. right after a skin reload or cold start. Same test as the section 19
+         splash, with the SplashTimeOut alarm term dropped on purpose (see 39b). 601 is the
+         Advanced path, 100601 the widgets-only path; whichever does not exist evaluates false. -->
+    <expression name="Exp_Hub_FirstWidgetRow_IsLoading">[[[Integer.IsEqual(Container(601).NumItems,0) | [Integer.IsEqual(Container(601).NumItems,1) + String.IsEqual(Container(601).ListItemAbsolute(0).Label,$LOCALIZE[31046])]] + Container(601).IsUpdating] | [[Integer.IsEqual(Container(100601).NumItems,0) | [Integer.IsEqual(Container(100601).NumItems,1) + String.IsEqual(Container(100601).ListItemAbsolute(0).Label,$LOCALIZE[31046])]] + Container(100601).IsUpdating]]</expression>
     <expression name="Exp_HomeMenu_HasFocus">[Control.HasFocus(300) | Control.HasFocus(306) | Control.HasFocus(307) | Control.HasFocus(308) | Control.HasFocus(309) | Control.HasFocus(331)]</expression>
     <expression name="Exp_HomeMenu_IsExpanded">[Skin.HasSetting(Home.ExpandedMenu)]</expression>
 

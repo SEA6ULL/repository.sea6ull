@@ -1,6 +1,6 @@
 # Arctic Vibe — Mod Changelog
 
-Ships as **Arctic Vibe** (`skin.arctic.vibe`, v1.1.6) by sea6ull.
+Ships as **Arctic Vibe** (`skin.arctic.vibe`, v1.1.10) by sea6ull.
 A modified fork of **Arctic Fuse 2** (`skin.arctic.fuse.2`, v2.12.12) by jurialmunkey.
 
 This document records every change made to the upstream skin, and — where it matters —
@@ -233,6 +233,10 @@ clicks and the existing hidden-button-307 route still work.
 * **Search reachability.** In the nav chain 308 sits between the category list and Search (309):
   `onleft` → categories (300), `onright` → 309. Search is therefore only reachable by passing
   *through* Options.
+
+> **Superseded in 1.1.9 — see section 40.** 308's `onfocus` now moves focus back to the last category
+> item before opening the dialog, which removes the reopen-loop risk above. Search (309) is no longer
+> reachable by pressing right through Options; it is reached by pressing left from the first category.
 
 ---
 
@@ -3828,6 +3832,9 @@ That is exactly the requested semantics ("initial focus"), and it is why this wa
 overridden the remembered position every single time you backed out to Home — a different and
 much more intrusive feature.
 
+**Correction (1.1.8):** the "or a skin reload" above is wrong. `ReloadSkin()` explicitly re-sends focus
+to the control that had it before the reload, overriding `defaultcontrol`. See section 39.
+
 ### 37d. Why a param and not a bare `Skin.HasSetting` in the condition
 
 `Action_Hubs_Onload` is shared by Home and by all eight `Custom_11xx_Hub_*.xml` windows. Putting
@@ -3908,6 +3915,351 @@ away from the menu.
 
 ---
 
+## 38. Shortcuts can point at a single Kodi favourite (v1.1.7)
+
+**Customise shortcuts → select an item → Options → "Favourites"** (heart icon, directly under
+*Action*). Opens the Favourites list; picking an entry makes that shortcut launch that favourite.
+The shortcut's label and icon are replaced with the favourite's name and thumbnail; both can be
+changed afterwards with *Rename* / *Icon* as usual. Menu shortcuts only — the button is hidden in
+widget editing mode, since a single favourite is an action, not widget content.
+
+### 38a. Why the stock picker could not do this
+
+The obvious implementation — a `favourites://` category in `shortcuts/skinvariables-shortcut-config.json`
+— **does not work and must not be attempted.** script.skinvariables' picker
+(`resources/lib/shortcuts/browser.py` → `jsonrpc.py`) lists folders through JSON-RPC
+`Files.GetDirectory`, and Kodi's `CFileUtils::RemoteAccessAllowed` rejects any path not on its
+allow-list. `favourites://` is not on it, so the category would always come back empty.
+Skin *containers* are not subject to that check, which is why dialog 1160 has always been able to
+show `<content>favourites://</content>`. The feature is therefore built around dialog 1160.
+
+### 38b. Flow
+
+1. Options button `29007` (`1080i/Includes_Shortcuts_Options.xml`, `Shortcuts_Options_Items_Basic`)
+   parks the edited item's `url` property in `Window(Home).Property(Shortcuts.PickFavourite)` and
+   opens `1160`. Pattern copied from the *Icon* button, which does the same with window `1117`.
+2. `1080i/Custom_1160_Dialog_Favourites.xml` has two conditional `onclick`s: property empty →
+   the original `skinvariables-openfavourite.json` launch (unchanged behaviour); property set →
+   `shortcuts/builtins/skinvariables-setfavouriteshortcut.json`. An `onunload` clears the property
+   on every close, so opening Favourites normally later always launches.
+3. `skinvariables-setfavouriteshortcut.json` reads `url`, `Label`, `Icon`, `FolderPath` with the
+   `infolabels` operation, **closes 1160 first**, then issues four `do_edit` calls:
+   `path`, `target` (→ `null`, i.e. cleared), `label`, `icon`.
+4. At menu build time, a new rule in `shortcuts/generator/data/setup/onclick_path.xml`
+   (`{item_path}<<favourites://`) emits
+   `RunScript(script.skinvariables,run_executebuiltin=…/skinvariables-runfavourite.json,use_rules,folderpath=…)`.
+5. `skinvariables-runfavourite.json` strips `favourites://`, URL-decodes, and executes the
+   command. It is `skinvariables-openfavourite.json` without the leading `Action(Close)` +
+   `sleep=0.5`, which exist only to dismiss dialog 1160 and would otherwise close whatever
+   menu dialog the shortcut was clicked from.
+
+### 38c. Traps — read before changing anything here
+
+* **Stored path format.** `path` is saved as Kodi's own `favourites://<url-encoded command>`
+  (exactly `ListItem.FolderPath`), **not** the decoded command. The encoded form contains no
+  commas, quotes, `=`, `|`, `<` or `>`, which is what makes it safe as a `RunScript` argument
+  and safe inside the generator condition (`check_condition` splits on `==`, `!=`, `>>`, `<<`,
+  `||` — a decoded plugin URL with `=` in it would mis-evaluate the rule).
+* **Everything is double-encoded on purpose.** The builtin `encode`s label, icon and folder path
+  before `RunPlugin`; skinvariables' plugin entry point `unquote_plus`es each `&&` argument once.
+  Net effect: label/icon arrive as plain text, folder path arrives as the single-encoded
+  `favourites://` form. Do **not** add `unencoded_paths=true` and do not drop the `encode` step:
+  a comma in a favourite's name would then split the `RunPlugin` builtin, and the path would be
+  stored decoded.
+* **`target` must be cleared.** If the item previously had a target (e.g. `videos` from the
+  normal chooser), the `{item_target}!=` rules would wrap the path in
+  `ActivateWindow(videos,favourites://…)`. The new generator rule also sits *above* those rules.
+* **The `sleep=1` gaps are load-bearing.** Each `RunPlugin` is a separate Python invocation that
+  reads the menu from the Home-window cache, edits one key, and writes it back. Run concurrently,
+  the later write can overwrite the earlier one. Slow devices may need a longer gap if a field is
+  seen not to stick.
+* **Read before close.** Operations run before actions, so the infolabels are captured while 1160
+  is still open; `Dialog.Close(1160)` is the first action. Reordering breaks it.
+* **Menu rebuild required** after install (generator template changed — see *Conventions*).
+* Requires `favourites://`, i.e. Kodi 21+ — already the floor via `xbmc.gui 5.17.0`.
+
+### 38d. Strings
+
+None added. The button label is `$LOCALIZE[1036]` (core *Favourites*), translated everywhere.
+
+### Files touched
+
+| File | Change |
+|---|---|
+| `1080i/Includes_Shortcuts_Options.xml` | button `29007` / image group `29107` after *Action* |
+| `1080i/Custom_1160_Dialog_Favourites.xml` | pick-mode `onclick` + `onunload` clear |
+| `shortcuts/builtins/skinvariables-setfavouriteshortcut.json` | **new** — writes favourite into the shortcut |
+| `shortcuts/builtins/skinvariables-runfavourite.json` | **new** — launches a stored favourite |
+| `shortcuts/generator/data/setup/onclick_path.xml` | `favourites://` rule above the target rules |
+| `addon.xml` | `1.1.6` → `1.1.7` |
+
+### Not verified on device
+
+Built and validated statically (steps 1–4 below, plus a simulation of the encode/decode chain).
+Untested in Kodi: that `RunPlugin` hands the query string to the plugin undecoded (the existing
+*Icon* button relies on the same behaviour), and that one second between writes is enough on
+the target hardware.
+
+---
+
+## 39. Options menu drawn over the splash after a shortcut/settings rebuild (v1.1.8)
+
+**Symptom.** With *Hide widget initialisation behind splash* and *Initial focus (Widgets)* both on,
+a cold start is correct: splash, then Home with the first widget focused. After changing anything in
+Customise shortcuts / skin settings, the rebuild reloads the skin and Home comes back with the splash
+correctly hiding the widgets, but the **Options menu (1170) drawn on top of it** and focus on
+Options instead of the first widget.
+
+### 39a. Cause
+
+Kodi's `ReloadSkin()` (`xbmc/application/ApplicationSkinHandling.cpp`) records the active window
+**and its focused control id** before unloading, then after loading re-activates the window and
+sends `GUI_MSG_SETFOCUS` to that control (whenever the window saves its last control, which
+`always="false"` means it does). The reload is triggered from Home's `onload`
+(`Action_BuildShortcuts_OnLoad` → `buildtemplate`) when you come back from editing.
+
+Every route into the editors goes through the Options menu, which section 7 opens from
+`onfocus` on button **308**. So Home's remembered control at reload time is 308. The reload puts
+focus back on 308, its `onfocus` fires `ActivateWindow(1170)`, and the dialog draws above the
+splash (which is only an overlay *inside* Home). `defaultcontrol 400` from section 37 never gets a
+say. A cold start has no remembered control, which is why it was always fine.
+
+### 39b. Fix
+
+`1080i/Includes_Hubs.xml`, button 308, split on a new expression
+`Exp_Hub_FirstWidgetRow_IsLoading` (`1080i/Includes_Expressions.xml`):
+
+* **Row 1 loaded** → unchanged: `ActivateWindow(1170)`. Normal hovering, and backing out of Skin
+  Settings to the Options menu with nothing rebuilt, behave exactly as before.
+* **Row 1 still loading** (only true right after a reload or a cold start) → the menu is **not**
+  opened; focus is parked on the category row (`SetFocus(300)`).
+* Additionally, **on Home with `Startup.InitialFocusWidgets` on** →
+  `shortcuts/builtins/skinvariables-reloadrefocus.json` polls every 0.25s (max 80 = 20s) and does
+  `SetFocus(400)` once the first row stops updating, giving the same landing as a cold start.
+  It gives up silently if focus leaves 300/308 or Home stops being active, so it cannot steal focus
+  from a user who has already started navigating or opened something.
+
+The expression is the section 19 splash test **without** the `System.HasAlarm(SplashTimeOut)` term.
+That alarm is started in Home's `onload`, and `RestoreControlStates()` runs *before* `onload`
+(`CGUIWindow::OnInitWindow`), so on that path the alarm term would be false at the moment 308's
+`onfocus` conditions are evaluated. It also means the fix works whether or not the splash setting is
+on. It ORs `601` (Advanced) and `100601` (widgets-only hubs); the non-existent one reports
+`IsUpdating` false and cannot latch (section 19's fail-safe rule).
+
+Conditions on `onfocus` are evaluated when the focus change happens (`CGUIAction::ExecuteActions`),
+not when the queued action runs, so the branch is decided at the right moment.
+
+### 39c. Why not the obvious alternatives
+
+* **`defaultcontrol always="true"`** — would stop `ReloadSkin()` restoring focus, but also discard the
+  remembered position on every return to Home. Rejected in 37c for the same reason.
+* **An `onload SetFocus(400)`** — runs on every Home activation, and on the reload path the explicit
+  `SETFOCUS` arrives after `onload` and overrides it anyway.
+* **Moving focus off 308 whenever 1170 opens** — would fix the reload, but changes where you land
+  after closing Options, and would restore to the category row, not the widgets.
+
+> **1.1.9 — see section 40.** Section 40 does move focus off 308 when 1170 opens, deliberately, for
+> the AF3 arrow-key behaviour. The landing change is now the wanted behaviour, and the widgets
+> landing is kept by moving the refocus script from 308's `onfocus` to 300's. The 39b loading split
+> on 308 is kept unchanged.
+
+### Known edges
+
+* Coming back from the editors, Home is shown once *before* the rebuild (widgets still populated),
+  so 1170 may flash open for a moment; `ReloadSkin()` closes it. Cosmetic.
+* If you move onto Options within the first seconds of a cold start with the splash **off**, you go
+  to the category row instead of the menu until row 1 has loaded.
+* Hubs (1101–1109) get the park-on-300 half only, matching section 37d: hubs land on categories.
+
+### Files touched
+
+| File | Change |
+|---|---|
+| `1080i/Includes_Hubs.xml` | 308 `onfocus` split into loaded / loading branches |
+| `1080i/Includes_Expressions.xml` | **new** `Exp_Hub_FirstWidgetRow_IsLoading` |
+| `shortcuts/builtins/skinvariables-reloadrefocus.json` | **new** — waits for row 1, then `SetFocus(400)` |
+| `MOD_CHANGELOG.md` | this section; correction note in 37c |
+| `addon.xml` | `1.1.7` → `1.1.8` |
+
+No menu rebuild needed: nothing under `shortcuts/generator/` changed.
+
+## 40. Options menu: arrow-key open/close ported from Arctic Fuse 3 (v1.1.9)
+
+**Behaviour.** From the hub category row, press right past the last category and the Options dialog
+(1170) opens. Inside it, press left from any left-edge control and the dialog closes, with focus back
+on the last category. This is how Arctic Fuse 3 (`skin.arctic.fuse.3`, omega) behaves out of the box;
+section 7 had only ported the *open* half, and in a way that left focus parked on the Options icon.
+
+### 40a. How AF3 does it (for reference — not copied verbatim)
+
+**Opening.** AF3's top menu has no focusable Options button. Focus rests on an invisible button `300`
+and left/right run the `action` property of the previous/next item of a hidden, wrapping list `399`
+(`Includes_Home.xml`, `Home_Control` / `Home_ControlList`). That list is ordered *current and later
+hubs → `ActivateWindow(1170)` → `noop` → earlier hubs*, so "right past the last hub" is a navigation
+action that opens the dialog while focus never moves. AF3's other route, hidden button `303`
+(`Includes_Hubs.xml`, `Hub_Window_Refocus_Buttons`), does `SetFocus(300)` **then**
+`ActivateWindow(1170)` — focus is moved off the trigger before the dialog opens.
+
+**Closing.** Every left-edge control in the dialog has `onleft` = the include's `onback` param,
+which is `PreviousMenu` (`Dialog_DialogView.xml`, `Includes_ButtonMenu.xml`):
+
+| Control | AF3 | Vibe before 1.1.9 |
+|---|---|---|
+| Single tile (`ButtonMenu_LayoutGroup_Single`) | `onleft` = close | `noop` |
+| Left tile of a pair (`70X1`) | `onleft` = close | wrap to `70X2` |
+| Right tile of a pair (`70X2`) | `onright` = `noop` | wrap to `70X1` |
+| Menu list `8000` | `onleft` = close | no `onleft` |
+| Media tray `6099` / bottom tray `6000` | nothing (fixedlist stops at its end) | same |
+
+Vibe's paired tiles wrapped, so left never reached an edge; the menu list had nowhere to go on left.
+
+### 40b. What changed in Vibe
+
+| File | Change |
+|---|---|
+| `1080i/Includes_ButtonMenu.xml` | `ButtonMenu_LayoutGroup_Single`: `onleft` `noop` → `Close` |
+| `1080i/Includes_ButtonMenu.xml` | `ButtonMenu_LayoutGroup_Double`, left tile: `onleft` `70$PARAM[groupid]2` → `Close` |
+| `1080i/Includes_ButtonMenu.xml` | `ButtonMenu_LayoutGroup_Double`, right tile: `onright` `70$PARAM[groupid]1` → `noop` |
+| `1080i/Custom_1170_Dialog_HomeMenu.xml` | list `8000`: added `<onleft>Close</onleft>` beside the existing `<oninfo>Close</oninfo>` |
+| `1080i/Includes_Hubs.xml` | `Hub_Categories_Options`, button `308`: added `SetFocus(300,9999,absolute)` **before** `ActivateWindow(1170)`, with the same `!Window.IsActive(1170) + !$EXP[Exp_Hub_FirstWidgetRow_IsLoading]` condition (the section 39 "row 1 loaded" branch) |
+| `1080i/Includes_Hubs.xml` | section 39's `RunScript(…reloadrefocus.json…)` **moved** from 308's `onfocus` to 300's `onfocus` in both `Hub_Categories_Definition` variants (text and icon menu styles), with an added `!Window.IsVisible(1170)` term — see 40d |
+| `addon.xml` | `1.1.8` → `1.1.9` |
+
+`Close` was used rather than AF3's `PreviousMenu` because it is what this dialog already uses for
+Info. The `ButtonMenu_LayoutGroup_*` includes are consumed only by dialog 1170 (verified by grep), so
+the change cannot leak into another window. Every tile type (`NowPlaying`, `Profile`, `SystemInfo`,
+`Settings`, generic) forwards `$PARAM[onleft]` to its button, so the three param edits cover all
+two-, three- and four-tile layouts.
+
+The dialog's `onload` focuses `7021` — the left tile of the lower row in every layout — so a single
+left press immediately after opening closes it.
+
+### 40c. Why 308 now hands focus back (the AF3 `303` pattern)
+
+With left-to-close, closing the dialog becomes the common path rather than a rare one, which makes
+section 7's known risks matter more:
+
+* **Reopen loop — removed.** 308 no longer holds focus while 1170 is open; the last category item
+  does. Closing the dialog returns focus to the category list, and 308's `onfocus` cannot re-fire.
+* **Landing spot.** Before, closing left you on the Options icon, where right went to Search rather
+  than back into the menu. Now you land on the last category: right reopens Options, left walks back
+  through the categories — identical to AF3.
+
+Action order inside 308 matters: `SetFocus(300,…)` must precede `ActivateWindow(1170)`. Both carry
+the same condition and both are evaluated when the focus change happens (see 39b), so both fire.
+
+### 40d. Interaction with section 39 (reload refocus)
+
+This was first written against 1.1.6, where section 39 did not exist; porting it to 1.1.8 needed one
+extra change.
+
+Section 39 relied on Home's remembered control at `ReloadSkin()` time being **308**: the reload
+restored focus there, 308's loading branch parked on 300, and 308 started the refocus script. After
+40c, 308 never holds focus while 1170 is open, so the remembered control is **300**. Consequences:
+
+* **The original section 39 bug cannot occur on this path any more** — the reload restores to 300,
+  which has no "open Options" action. 308's loading split (39b) is kept regardless, as a guard for any
+  remaining route that leaves focus on 308 (e.g. mouse hover at the moment of a reload).
+* **The widgets landing would have been lost**, because the script was only started from 308. It is
+  now started from 300's `onfocus`, under the same conditions plus `!Window.IsVisible(1170)`. 308's
+  loading branch still does `SetFocus(300)`, which fires 300's `onfocus` and starts the script — so
+  there is exactly one owner and no duplicate poller. With *Initial focus (Widgets)* off, the landing
+  is the category row, as in 1.1.8.
+
+Why `!Window.IsVisible(1170)`: on the normal arrow path 300 receives focus from 308's `SetFocus` just
+before the dialog opens. At that moment row 1 is loaded (308's branch requires it), so the loading
+term is already false; the extra term is belt and braces. The script itself also gives up as soon as
+focus is not on 300/308 in the active window, which is the dialog once 1170 is open.
+
+`Window.IsActive(Home)` keeps hubs (1101–1109) out of it, matching 37d/39.
+
+### 40e. Consequences to know about
+
+* **Search (309) by the right arrow.** 308's `onright` → `309` is now unreachable by keyboard,
+  because 308 never keeps focus. Search is reached by pressing **left from the first category**
+  (`300` `onleft` → `309`, already present). Left from Search still goes to 308, which now means
+  "open Options". 308's `onright` was left in place.
+* **Mouse / touch.** Hovering 308 opens the dialog and moves focus to the category row. The
+  `onclick` → `307` path is kept.
+* **`Control.HasFocus(308)` in `Hub_Categories_Definition_Content`'s `onup` conditions** is now
+  effectively always false. Those are dead branches now, harmless, and were left untouched.
+* **Other ways into 1170** (Info on the home menu, `Home.LeftMenu.Action=Options`,
+  `DialogButtonMenu.xml`) also get left-to-close, as in AF3.
+* **Cold start with *Initial focus (Widgets)* on.** If Kodi falls back to 300 because row 1 has no
+  focusable item yet (37's known edge), 300's `onfocus` now starts the refocus script and focus moves
+  to the widgets once row 1 arrives. That is the intended landing, reached by a new route.
+
+### Validation
+
+XML well-formedness on all 206 files in `1080i/`; include and `$VAR`/`$EXP` reference counts
+identical before and after the change (no new dangling references). Manifest diff against 1.1.8:
+exactly the four files in the 40b table differ, plus this changelog. No menu rebuild needed: nothing
+under `shortcuts/generator/` changed.
+
+## 41. Options icon flashed when arrowing into the menu (v1.1.10)
+
+**Symptom.** Arrowing right past the last category (or left from Search) opened Options correctly,
+but the Options icon and its circular highlight drew for a frame first, and the category labels
+dimmed for that same frame. AF3 shows no flash.
+
+### 41a. Cause
+
+Section 40 still reached the menu *through* button 308: the keyboard moved focus onto 308, and 308's
+`onfocus` then moved focus back to 300 and opened 1170. Those actions are queued, so there is at
+least one rendered frame with `Control.HasFocus(308)` true. Everything keyed on it draws in that
+frame: the highlight `Texture_Circle_Highlight_V` and the coloured `bars.png`
+(`Hub_Categories_Options`), and `Hub_Categories_Color_FO` switches the category text to `main_fg_30`.
+
+AF3 has no flash because focus never lands on a visible Options control: the "right past the last
+hub" step *is* the `ActivateWindow(1170)` action (section 40a).
+
+### 41b. Fix
+
+Take 308 out of the keyboard path entirely (`1080i/Includes_Hubs.xml`):
+
+| Control | Before (1.1.9) | After (1.1.10) |
+|---|---|---|
+| Category list `300`, both `Hub_Categories_Definition` variants | `onright` → `308` | `onright` → `ActivateWindow(1170)`, same visibility condition plus `!$EXP[Exp_Hub_FirstWidgetRow_IsLoading]` |
+| Search `309` | `onleft` → `308` | `onleft` → `SetFocus(300,9999,absolute)`, then `ActivateWindow(1170)` when row 1 is not loading |
+
+A list's `onright` only fires when it cannot move further, so `300`'s runs only on the last category.
+Focus stays on that category while the dialog is open and is still there when it closes — the same
+landing section 40 produced, without the detour.
+
+**308 is unchanged** and keeps its section 39/40 `onfocus` logic. It is now reached only by mouse
+hover or by a focus restore, and hover highlighting is expected there.
+
+### 41c. Loading guard (section 39 parity)
+
+In 1.1.9, arrowing onto 308 while widget row 1 was still loading parked focus on 300 and did not open
+the menu. The same condition is carried over: while loading, right on the last category does nothing,
+and left from Search just moves to the last category. `onleft`/`onright` conditions are evaluated
+together when the key is handled, before the queued `SetFocus` changes the selected category, so
+moving from Search does not trip the guard by starting a widget reload.
+
+### Known edges
+
+* **Dead code.** 308's `onright` → `309` is now unreachable by keyboard as well as by section 40's
+  focus hand-back. It was left in for mouse users.
+* **Other top-menu layouts.** `Includes_Home.xml` (the side-menu Home layout) also has a control with
+  id 308, reached by `onup`, and `Includes_Actions.xml` has a `SetFocus(308)`. Those belong to
+  different layouts, not the hub top bar, and were not changed.
+
+### Files touched
+
+| File | Change |
+|---|---|
+| `1080i/Includes_Hubs.xml` | `300` `onright` (×2) and `309` `onleft` open 1170 directly |
+| `MOD_CHANGELOG.md` | this section; quick-reference row updated |
+| `addon.xml` | `1.1.9` → `1.1.10` |
+
+Kodi compares versions per component, so `1.1.10` is above `1.1.9`.
+
+Validation: XML well-formedness on all 206 files in `1080i/`, reference counts unchanged, manifest
+identical to 1.1.9, only the files above differ.
+
+---
+
 ## Validation performed after every change
 
 1. **XML well-formedness** across all files in `1080i/` (258 files at last count).
@@ -3964,5 +4316,8 @@ away from the menu.
 | OSD inset per aspect ratio | bucket tables in `Animation_OSD_MatchContent_Bottom` / `_Top` / `_Dim` | 21-192px |
 | Player Process Info button | control `6009` in `VideoOSD.xml` / `MusicOSD.xml` **and** slot 9 in `OSD_CustomDialog_GroupList` — change both or the row desyncs — see 36 | left of settings |
 | Home initial focus | `Startup.InitialFocusWidgets` → `initial_focus_widgets` param in `Action_Hubs_Onload`; needs `reload=true` — see 37 | off (categories) |
+| Favourite shortcut write gap | `sleep=1` between `do_edit` calls in `skinvariables-setfavouriteshortcut.json` — see 38c | 1s |
+| Post-reload widget refocus | `sleep=0.25` × `attempts=80` in `skinvariables-reloadrefocus.json`; started from 300 `onfocus` since 1.1.9 (was 308) — see 39b, 40d | 20s max |
+| Options open/close by arrows | open: 300 `onright` and 309 `onleft` call `ActivateWindow(1170)` directly (308 is bypassed — see 41); 308 `onfocus` kept for mouse; close: `onleft` params in `ButtonMenu_LayoutGroup_Single`/`_Double` + list `8000` — see 40 | on |
 
 10.8px = 1% of screen height. Remember to update `-name` negative twins.

@@ -1,0 +1,21 @@
+{
+    "operations": [
+        {
+            "regex": {
+                "folderpath": {
+                    "regex": "favourites://",
+                    "value": "",
+                    "input": "{folderpath}"
+                }
+            }
+        },
+        {
+            "decode": {
+                "folderpath": "{folderpath}"
+            }
+        }
+    ],
+    "actions": [
+        "{folderpath}"
+    ]
+}

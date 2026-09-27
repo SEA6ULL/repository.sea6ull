@@ -552,7 +552,15 @@
                 <param name="property_window_id">$PARAM[property_window_id]</param>
             </include>
             <onleft condition="!Skin.HasSetting(SideMenu.DisableSearchAndOptions) + [Skin.HasSetting(HubsMenu.EnableSearchAndOptions) | [Window.IsVisible(Home) + Integer.IsEqual(Skin.String(Hub.Home.ReplaceWindow),$PARAM[window_id])]]">309</onleft>
-            <onright condition="!Skin.HasSetting(SideMenu.DisableSearchAndOptions) + [Skin.HasSetting(HubsMenu.EnableSearchAndOptions) | [Window.IsVisible(Home) + Integer.IsEqual(Skin.String(Hub.Home.ReplaceWindow),$PARAM[window_id])]]">308</onright>
+            <!-- SKINMOD: section 41. Right past the last category opens Options directly instead of
+                 focusing 308, so the Options icon/highlight never draws for a frame (AF3 behaviour).
+                 While widget row 1 is still loading nothing happens (section 39 parity). -->
+            <onright condition="!Skin.HasSetting(SideMenu.DisableSearchAndOptions) + [Skin.HasSetting(HubsMenu.EnableSearchAndOptions) | [Window.IsVisible(Home) + Integer.IsEqual(Skin.String(Hub.Home.ReplaceWindow),$PARAM[window_id])]] + !$EXP[Exp_Hub_FirstWidgetRow_IsLoading]">ActivateWindow(1170)</onright>
+            <!-- SKINMOD: section 40 (moved from 308, section 39). ReloadSkin() now restores focus to 300,
+                 so this is where the reload lands. On Home with "Initial focus (Widgets)" on, wait for
+                 widget row 1 and then move to it. !Window.IsVisible(1170) keeps it out of the way while
+                 the Options menu is open; the script also gives up if focus leaves 300/308. -->
+            <onfocus condition="$EXP[Exp_Hub_FirstWidgetRow_IsLoading] + Window.IsActive(Home) + Skin.HasSetting(Startup.InitialFocusWidgets) + !Window.IsVisible(1170)">RunScript(script.skinvariables,run_executebuiltin=special://skin/shortcuts/builtins/skinvariables-reloadrefocus.json,use_rules,attempts=80)</onfocus>
             <content>
                 <include>skinvariables-$PARAM[categories]-staticitems</include>
             </content>
@@ -570,7 +578,15 @@
                 <param name="property_window_id">$PARAM[property_window_id]</param>
             </include>
             <onleft condition="!Skin.HasSetting(SideMenu.DisableSearchAndOptions) + [Skin.HasSetting(HubsMenu.EnableSearchAndOptions) | [Window.IsVisible(Home) + Integer.IsEqual(Skin.String(Hub.Home.ReplaceWindow),$PARAM[window_id])]]">309</onleft>
-            <onright condition="!Skin.HasSetting(SideMenu.DisableSearchAndOptions) + [Skin.HasSetting(HubsMenu.EnableSearchAndOptions) | [Window.IsVisible(Home) + Integer.IsEqual(Skin.String(Hub.Home.ReplaceWindow),$PARAM[window_id])]]">308</onright>
+            <!-- SKINMOD: section 41. Right past the last category opens Options directly instead of
+                 focusing 308, so the Options icon/highlight never draws for a frame (AF3 behaviour).
+                 While widget row 1 is still loading nothing happens (section 39 parity). -->
+            <onright condition="!Skin.HasSetting(SideMenu.DisableSearchAndOptions) + [Skin.HasSetting(HubsMenu.EnableSearchAndOptions) | [Window.IsVisible(Home) + Integer.IsEqual(Skin.String(Hub.Home.ReplaceWindow),$PARAM[window_id])]] + !$EXP[Exp_Hub_FirstWidgetRow_IsLoading]">ActivateWindow(1170)</onright>
+            <!-- SKINMOD: section 40 (moved from 308, section 39). ReloadSkin() now restores focus to 300,
+                 so this is where the reload lands. On Home with "Initial focus (Widgets)" on, wait for
+                 widget row 1 and then move to it. !Window.IsVisible(1170) keeps it out of the way while
+                 the Options menu is open; the script also gives up if focus leaves 300/308. -->
+            <onfocus condition="$EXP[Exp_Hub_FirstWidgetRow_IsLoading] + Window.IsActive(Home) + Skin.HasSetting(Startup.InitialFocusWidgets) + !Window.IsVisible(1170)">RunScript(script.skinvariables,run_executebuiltin=special://skin/shortcuts/builtins/skinvariables-reloadrefocus.json,use_rules,attempts=80)</onfocus>
             <content>
                 <include>skinvariables-$PARAM[categories]-staticitems</include>
             </content>
@@ -604,7 +620,11 @@
                     </include>
                     <onfocus>SetProperty(Slide.WidgetContainer,300,$PARAM[property_window_id])</onfocus>
                     <onclick>$VAR[Action_ActivateSearchDiscover]</onclick>
-                    <onleft>308</onleft>
+                    <!-- SKINMOD: section 41. Left from Search opens Options without passing focus through 308
+                         (no icon flash): focus goes straight to the last category, then the dialog opens.
+                         While widget row 1 is loading, only the focus move happens (section 39 parity). -->
+                    <onleft>SetFocus(300,9999,absolute)</onleft>
+                    <onleft condition="!$EXP[Exp_Hub_FirstWidgetRow_IsLoading]">ActivateWindow(1170)</onleft>
                     <onright>SetFocus(300,0,absolute)</onright>
                 </control>
                 <control type="group">
@@ -653,7 +673,21 @@
                     <!-- SKINMOD: Options menu opens as soon as 308 is hovered/focused.
                          Guarded by !Window.IsActive(1170) so it cannot re-trigger while already open.
                          onclick kept so mouse clicks and the 307 path still work. -->
-                    <onfocus condition="!Window.IsActive(1170)">ActivateWindow(1170)</onfocus>
+                    <!-- SKINMOD: section 39. Kodi's ReloadSkin() puts focus back on whatever control
+                         had it before the reload, and after editing shortcuts/settings that is 308
+                         (they are reached through this menu). That landed here with the widgets
+                         still loading, opening 1170 over the splash. While the first widget row is
+                         loading, focus is parked on the category row instead and, on Home with
+                         "Initial focus (Widgets)" on, moved to the widgets once row 1 arrives. -->
+                    <!-- SKINMOD: section 40. Focus is handed back to the last category item BEFORE the
+                         dialog opens (AF3's hidden-button-303 pattern), so 308 is never a resting focus
+                         point: closing the dialog lands on the category row and cannot re-fire this
+                         onfocus. It also means ReloadSkin() now restores focus to 300, not 308, so the
+                         section 39 widget refocus script moved to 300's onfocus (Hub_Categories_Definition).
+                         The loading branch still parks on 300, which then starts that script. -->
+                    <onfocus condition="!Window.IsActive(1170) + !$EXP[Exp_Hub_FirstWidgetRow_IsLoading]">SetFocus(300,9999,absolute)</onfocus>
+                    <onfocus condition="!Window.IsActive(1170) + !$EXP[Exp_Hub_FirstWidgetRow_IsLoading]">ActivateWindow(1170)</onfocus>
+                    <onfocus condition="$EXP[Exp_Hub_FirstWidgetRow_IsLoading]">SetFocus(300)</onfocus>
                     <onclick>SetProperty(307Refocus,308)</onclick>
                     <onclick>SetFocus(307)</onclick>
                     <onright>309</onright>

@@ -553,7 +553,8 @@
             <param name="id">70$PARAM[groupid]1</param>
             <param name="onup">$PARAM[onup]</param>
             <param name="ondown">$PARAM[ondown]</param>
-            <param name="onleft">noop</param>
+            <!-- SKINMOD: left from a single (full-width) tile closes the Options dialog (was noop). Ported from AF3. -->
+            <param name="onleft">Close</param>
             <param name="onright">noop</param>
             <param name="onclick">$PARAM[button_one_onclick]</param>
             <param name="label">$PARAM[button_one_label]</param>
@@ -570,7 +571,8 @@
                 <param name="id">70$PARAM[groupid]1</param>
                 <param name="onup">$PARAM[a_onup]</param>
                 <param name="ondown">$PARAM[a_ondown]</param>
-                <param name="onleft">70$PARAM[groupid]2</param>
+                <!-- SKINMOD: left from the left tile closes the Options dialog (was a wrap to 70X2). Ported from AF3. -->
+                <param name="onleft">Close</param>
                 <param name="onright">70$PARAM[groupid]2</param>
                 <param name="onclick">$PARAM[button_one_onclick]</param>
                 <param name="label">$PARAM[button_one_label]</param>
@@ -587,7 +589,8 @@
                 <param name="onup">$PARAM[b_onup]</param>
                 <param name="ondown">$PARAM[b_ondown]</param>
                 <param name="onleft">70$PARAM[groupid]1</param>
-                <param name="onright">70$PARAM[groupid]1</param>
+                <!-- SKINMOD: right edge stops here (was a wrap to 70X1), matching AF3. -->
+                <param name="onright">noop</param>
                 <param name="onclick">$PARAM[button_two_onclick]</param>
                 <param name="label">$PARAM[button_two_label]</param>
                 <param name="icon">$PARAM[button_two_icon]</param>

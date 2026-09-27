@@ -117,6 +117,23 @@
             <visible>$EXP[Shortcuts_Dialog_Exp_IsEnabled]</visible>
         </include>
 
+        <!-- SKINMOD: Favourites picker (section 38). Point this shortcut at a single Kodi favourite.
+             The url of the item being edited is parked in a Home property, then dialog 1160 opens
+             in pick mode and writes the chosen favourite back via the setfavouriteshortcut builtin.
+             Menu shortcuts only: a single favourite is an action, not widget content. -->
+        <include content="Settings_ButtonImage">
+            <visible>Integer.IsEqual(Window.Property(CurrentPosition),Container(22001).ListItem.CurrentItem)</visible>
+            <param name="id">29007</param>
+            <param name="groupid">29107</param>
+            <label>$LOCALIZE[1036]</label>
+            <param name="icon">special://skin/extras/icons/heart.png</param>
+            <onclick>SetProperty(Shortcuts.PickFavourite,$INFO[Container(22001).ListItem.Property(url)],Home)</onclick>
+            <onclick>ActivateWindow(1160)</onclick>
+            <onback>22904</onback>
+            <visible>$EXP[Shortcuts_Dialog_Exp_IsEnabled]</visible>
+            <visible>!$EXP[Shortcuts_Dialog_Exp_IsWidgetMode]</visible>
+        </include>
+
         <!-- Rename -->
         <include content="Settings_ButtonImage">
             <visible>Integer.IsEqual(Window.Property(CurrentPosition),Container(22001).ListItem.CurrentItem)</visible>

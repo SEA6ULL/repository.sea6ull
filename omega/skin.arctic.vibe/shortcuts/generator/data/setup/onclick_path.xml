@@ -28,6 +28,17 @@
                 ]]>
             </value>
         </rule>
+        <!-- SKINMOD: single-favourite shortcuts (section 38). Path is stored in Kodi's own
+             favourites:// url-encoded form and decoded at click time, exactly as dialog 1160
+             launches favourites. Must sit above the item_target rules. -->
+        <rule>
+            <condition>{item_path}&lt;&lt;favourites://</condition>
+            <value>
+                <![CDATA[
+                <onclick>RunScript(script.skinvariables,run_executebuiltin=special://skin/shortcuts/builtins/skinvariables-runfavourite.json,use_rules,folderpath={item_path})</onclick>
+                ]]>
+            </value>
+        </rule>
         <rule>
             <condition>{item_menu}!&lt;-customnode-</condition>
             <condition>{item_target}!=</condition>

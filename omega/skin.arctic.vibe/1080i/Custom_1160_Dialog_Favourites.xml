@@ -3,6 +3,10 @@
 
     <defaultcontrol always="true">450</defaultcontrol>
     <onload>SetProperty(TMDbHelper.ContextMenu,True)</onload>
+    <!-- SKINMOD: pick mode (section 38). Shortcuts.PickFavourite holds the url of the shortcut being
+         edited while this dialog is open from the shortcut Options menu; it is cleared on every close so
+         a normal open of the Favourites dialog always launches. -->
+    <onunload>ClearProperty(Shortcuts.PickFavourite,Home)</onunload>
     <controls>
 
         <include>Dialog_Dim_Overlay</include>
@@ -32,7 +36,9 @@
                     <param name="variation">True</param>
                     <param name="icon">common/_none.png</param>
                     <include>Dimension_Dialog_Body_Group</include>
-                    <onclick>RunScript(script.skinvariables,run_executebuiltin=special://skin/shortcuts/builtins/skinvariables-openfavourite.json,use_rules,folderpath=$INFO[Container(450).ListItem.FolderPath])</onclick>
+                    <!-- SKINMOD: launch normally, or in pick mode write the favourite into the shortcut (section 38) -->
+                    <onclick condition="String.IsEmpty(Window(Home).Property(Shortcuts.PickFavourite))">RunScript(script.skinvariables,run_executebuiltin=special://skin/shortcuts/builtins/skinvariables-openfavourite.json,use_rules,folderpath=$INFO[Container(450).ListItem.FolderPath])</onclick>
+                    <onclick condition="!String.IsEmpty(Window(Home).Property(Shortcuts.PickFavourite))">RunScript(script.skinvariables,run_executebuiltin=special://skin/shortcuts/builtins/skinvariables-setfavouriteshortcut.json,use_rules)</onclick>
                     <content>favourites://</content>
                     <pagecontrol>61</pagecontrol>
                     <onright>61</onright>

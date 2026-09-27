@@ -1,0 +1,23 @@
+{
+    "infolabels": {
+        "url": "Window(Home).Property(Shortcuts.PickFavourite)",
+        "label": "Container(450).ListItem.Label",
+        "icon": "Container(450).ListItem.Icon",
+        "folderpath": "Container(450).ListItem.FolderPath"
+    },
+    "encode": {
+        "label": "{label}",
+        "icon": "{icon}",
+        "folderpath": "{folderpath}"
+    },
+    "actions": [
+        "Dialog.Close(1160)",
+        "RunPlugin({url}&func=do_edit&&key::path&&value::{folderpath})",
+        "sleep=1",
+        "RunPlugin({url}&func=do_edit&&key::target&&value::null)",
+        "sleep=1",
+        "RunPlugin({url}&func=do_edit&&key::label&&value::{label})",
+        "sleep=1",
+        "RunPlugin({url}&func=do_edit&&key::icon&&value::{icon})"
+    ]
+}

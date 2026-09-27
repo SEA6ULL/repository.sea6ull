@@ -98,6 +98,8 @@
                                     <ondown condition="Skin.HasSetting(Options.DisableBottomTray)">7010</ondown>
                                     <ondown condition="!Skin.HasSetting(Options.DisableBottomTray)">SetFocus(6000,2)</ondown>
                                     <oninfo>Close</oninfo>
+                                    <!-- SKINMOD: left from the menu list closes the Options dialog. Ported from AF3. -->
+                                    <onleft>Close</onleft>
                                     <content>
                                         <include>skinvariables-powermainmenu-staticitems</include>
                                     </content>
