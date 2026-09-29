@@ -1,5 +1,30 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <addons>
+<addon id="plugin.audio.rotation" name="Rotation" version="1.0.9" provider-name="SEA6ULL / GPT">
+    <requires>
+        <import addon="xbmc.python" version="3.0.0"/>
+        <import addon="script.module.beautifulsoup4"/>
+        <import addon="script.module.requests"/>
+        <import addon="script.module.routing"/>
+        <import addon="script.module.pil"/>
+    </requires>
+    <extension point="xbmc.python.pluginsource" library="default.py">
+        <provides>audio</provides>
+    </extension>
+    <extension point="xbmc.service" library="service.py" start="login"/>
+    <extension point="xbmc.addon.metadata">
+        <reuselanguageinvoker>true</reuselanguageinvoker>
+        <platform>all</platform>
+        <license>GPL-3.0</license>
+        <summary>Dynamic charts, playlists, and radio for your Kodi music library</summary>
+        <description>Rotation turns trending charts, editorial playlists, artist radio, and intelligent library mixes into playable Kodi playlists using music already in your local library.</description>
+        <assets>
+            <icon>resources/media/icon.png</icon>
+            <fanart>resources/media/fanart.jpg</fanart>
+        </assets>
+    </extension>
+</addon>
+
 <addon id="plugin.program.sea6ullwiz" name="SEA6ULL Wizard" version="1.0.3" provider-name="SEA6ULL">
 	<requires>
 		<import addon="xbmc.python" version="3.0.1"/>

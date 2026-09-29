@@ -1,0 +1,240 @@
+# Kodi Media Center language file
+# Addon Name: Rotation
+# Addon id: plugin.audio.rotation
+# Addon Provider: SEA6ULL / GPT
+#
+# Settings labels MUST live here and be referenced from settings.xml by
+# numeric ID (label="30000"). Kodi's settings format treats the label
+# attribute as a string ID, not display text - a literal string renders
+# as a blank label with a working control underneath it.
+#
+# Addon string IDs are conventionally 30000-32999.
+msgid ""
+msgstr ""
+"Project-Id-Version: plugin.audio.rotation\n"
+"Report-Msgid-Bugs-To: https://github.com/xbmc/xbmc/issues/\n"
+"POT-Creation-Date: 2026-01-01 00:00+0000\n"
+"PO-Revision-Date: 2026-01-01 00:00+0000\n"
+"Last-Translator: SEA6ULL\n"
+"Language-Team: English (United Kingdom)\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Language: en_gb\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+# Categories
+
+msgctxt "#30000"
+msgid "General"
+msgstr ""
+
+msgctxt "#30001"
+msgid "Artwork"
+msgstr ""
+
+msgctxt "#30002"
+msgid "Network"
+msgstr ""
+
+# General - Browsing
+
+msgctxt "#30020"
+msgid "Browsing"
+msgstr ""
+
+msgctxt "#30021"
+msgid "Results per page"
+msgstr ""
+
+msgctxt "#30022"
+msgid "Display [x] when not in library"
+msgstr ""
+
+msgctxt "#30023"
+msgid "Mark albums and tracks that are not in your library while browsing artist pages"
+msgstr ""
+
+msgctxt "#30024"
+msgid "Sync favorites and My Playlists across Kodi devices"
+msgstr ""
+
+msgctxt "#30025"
+msgid "Stores shared Rotation data in a .rotation folder inside your Kodi music source. Every Kodi device must use the same music source and have read/write access to it."
+msgstr ""
+
+msgctxt "#30026"
+msgid "Explicit content"
+msgstr ""
+
+msgctxt "#30027"
+msgid "Hide tracks only when the metadata source positively identifies them as explicit. Tracks with unknown status remain visible."
+msgstr ""
+
+msgctxt "#30028"
+msgid "Allow"
+msgstr ""
+
+msgctxt "#30029"
+msgid "Hide"
+msgstr ""
+
+# Artwork
+
+msgctxt "#30030"
+msgid "High-resolution artwork"
+msgstr ""
+
+msgctxt "#30031"
+msgid "Look up high-resolution artwork online"
+msgstr ""
+
+msgctxt "#30032"
+msgid "Use artist backgrounds as fanart"
+msgstr ""
+
+msgctxt "#30033"
+msgid "Personal fanart.tv API key (optional)"
+msgstr ""
+
+msgctxt "#30074"
+msgid "Optional. Improves access to fanart.tv artist backgrounds, clearlogos, and alternate artwork. Rotation can still retrieve artwork from other sources without it."
+msgstr ""
+
+msgctxt "#30034"
+msgid "Artwork lookup timeout (seconds)"
+msgstr ""
+
+msgctxt "#30035"
+msgid "Also look up artwork in album listings"
+msgstr ""
+
+msgctxt "#30036"
+msgid "Max seconds a listing may spend on artwork"
+msgstr ""
+
+msgctxt "#30037"
+msgid "Load album artwork in the background"
+msgstr ""
+
+msgctxt "#30038"
+msgid "Show artist portraits in artist listings"
+msgstr ""
+
+msgctxt "#30039"
+msgid "Use TheAudioDB for artist portraits"
+msgstr ""
+
+msgctxt "#30043"
+msgid "TheAudioDB API key (123 = free shared key)"
+msgstr ""
+
+# Network
+
+msgctxt "#30040"
+msgid "Requests"
+msgstr ""
+
+msgctxt "#30041"
+msgid "Request timeout (seconds)"
+msgstr ""
+
+msgctxt "#30044"
+msgid "Use MusicMP3.ru as a streaming fallback"
+msgstr ""
+
+msgctxt "#30045"
+msgid "When a track is not in the Kodi library, try to stream a strict artist and title match from MusicMP3.ru"
+msgstr ""
+
+msgctxt "#30050"
+msgid "Playlists"
+msgstr ""
+
+msgctxt "#30051"
+msgid "Playlist building"
+msgstr ""
+
+msgctxt "#30052"
+msgid "Playlist length (tracks requested)"
+msgstr ""
+
+msgctxt "#30053"
+msgid "Title match strictness"
+msgstr ""
+
+msgctxt "#30054"
+msgid "Allow matches by title alone (ignores artist)"
+msgstr ""
+
+msgctxt "#30056"
+msgid "Metadata source"
+msgstr ""
+
+msgctxt "#30057"
+msgid "Prefer Last.fm for charts and radio"
+msgstr ""
+
+msgctxt "#30058"
+msgid "Last.fm API key"
+msgstr ""
+
+msgctxt "#30059"
+msgid "Country for local charts"
+msgstr ""
+
+msgctxt "#30060"
+msgid "Caching"
+msgstr ""
+
+msgctxt "#30061"
+msgid "Playlist cache lifetime (hours)"
+msgstr ""
+
+msgctxt "#30062"
+msgid "Library index lifetime (hours)"
+msgstr ""
+
+msgctxt "#30063"
+msgid "Reports"
+msgstr ""
+
+msgctxt "#30064"
+msgid "Track music missing from library"
+msgstr ""
+
+msgctxt "#30065"
+msgid "Track confirmed local-library misses and show them under Maintenance"
+msgstr ""
+
+msgctxt "#30066"
+msgid "Maintain CSV export"
+msgstr ""
+
+msgctxt "#30067"
+msgid "Keep the missing-music CSV synchronized with the in-addon report"
+msgstr ""
+
+msgctxt "#30068"
+msgid "Show release year after artist album titles"
+msgstr ""
+
+msgctxt "#30069"
+msgid "Display reliable release years in parentheses on artist album and Singles & EPs pages"
+msgstr ""
+
+msgctxt "#30070"
+msgid "Last.fm username"
+msgstr ""
+
+msgctxt "#30071"
+msgid "Used for For You recommendations and listening history. Install Kodi's official Last.fm service add-on separately to scrobble playback."
+msgstr ""
+
+msgctxt "#30072"
+msgid "Use Kodi music library"
+msgstr ""
+
+msgctxt "#30073"
+msgid "Match tracks and artwork against your Kodi music library. Turn this off to use Rotation only as a streaming service."
+msgstr ""
