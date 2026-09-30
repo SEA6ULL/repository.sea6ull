@@ -279,15 +279,24 @@ def library_artist_art(artist):
     """
     key = norm_artist(artist)
     if not key:
-        return {"thumb": "", "fanart": ""}
+        return {"thumb": "", "fanart": "", "clearlogo": ""}
 
     now = time.time()
     if now - _ARTIST_ART["checked"] >= 300:
         result = rpc("AudioLibrary.GetArtists", {
             "albumartistsonly": True,
-            "properties": ["thumbnail", "fanart"],
+            "properties": ["thumbnail", "fanart", "art"],
             "limits": {"start": 0, "end": 100000},
         })
+        # Older Kodi JSON-RPC schemas do not expose the generic art map for
+        # music artists. Preserve thumb/fanart there instead of allowing one
+        # unsupported optional field to invalidate the complete request.
+        if result is None:
+            result = rpc("AudioLibrary.GetArtists", {
+                "albumartistsonly": True,
+                "properties": ["thumbnail", "fanart"],
+                "limits": {"start": 0, "end": 100000},
+            })
         if result is not None:
             items = {}
             for row in result.get("artists", []) or []:
@@ -296,13 +305,16 @@ def library_artist_art(artist):
                     items[normalized] = {
                         "thumb": row.get("thumbnail", "") or "",
                         "fanart": row.get("fanart", "") or "",
+                        "clearlogo": ((row.get("art") or {}).get("clearlogo") or
+                                      (row.get("art") or {}).get("logo") or ""),
                     }
             _ARTIST_ART["items"] = items
             xbmc.log("[rotation] Kodi library art: %d artist(s)"
                      % len(items), xbmc.LOGINFO)
         _ARTIST_ART["checked"] = now
 
-    return _ARTIST_ART["items"].get(key, {"thumb": "", "fanart": ""})
+    return _ARTIST_ART["items"].get(
+        key, {"thumb": "", "fanart": "", "clearlogo": ""})
 
 
 def library_artist_fanart(artist):
@@ -315,6 +327,11 @@ def library_artist_fanart(artist):
     unchanged so Kodi remains responsible for resolving its own artwork.
     """
     return library_artist_art(artist).get("fanart", "")
+
+
+def library_artist_logo(artist):
+    """Return Kodi's clearlogo for an exact library album artist."""
+    return library_artist_art(artist).get("clearlogo", "")
 
 
 # --------------------------------------------------------------------------- #

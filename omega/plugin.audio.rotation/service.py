@@ -3,8 +3,9 @@
 
 import hashlib
 import json
+import sys
 import time
-from urllib.parse import unquote
+from urllib.parse import unquote, urlparse, parse_qs
 
 import xbmc
 import xbmcaddon
@@ -70,7 +71,23 @@ def _maintain_playback_lookahead():
 
 
 def _plugin_route(value):
-    return unquote(value or "").split("?", 1)[0].rstrip("/").casefold()
+    """Keep query-selected playlists distinct when applying a pending redraw."""
+    parsed = urlparse(value or "")
+    query = tuple(sorted(
+        (key.casefold(), tuple(item.casefold() for item in values))
+        for key, values in parse_qs(
+            parsed.query, keep_blank_values=True).items()))
+    return parsed.netloc.casefold(), parsed.path.rstrip("/").casefold(), query
+
+
+_LAST_REFRESH_HOLD = ""
+
+
+def _refresh_hold(reason):
+    global _LAST_REFRESH_HOLD
+    if reason != _LAST_REFRESH_HOLD:
+        _LAST_REFRESH_HOLD = reason
+        _log("Artwork refresh held: %s" % reason)
 
 
 def _refresh_pending_directory():
@@ -81,7 +98,8 @@ def _refresh_pending_directory():
     # produced a pending marker. Otherwise a marker could arrive in the narrow
     # gap between a context menu closing and its selected action starting.
     try:
-        dialog_active = xbmcgui.getCurrentWindowDialogId() != 0
+        dialog_active = (xbmc.getCondVisibility("System.HasActiveModalDialog") or
+                         xbmcgui.getCurrentWindowDialogId() in (10106, 10138, 10160, 12000))
         player_window = xbmcgui.getCurrentWindowId() in (12005, 12006)
     except (AttributeError, RuntimeError):
         dialog_active = xbmc.getCondVisibility("System.HasActiveModalDialog")
@@ -93,6 +111,10 @@ def _refresh_pending_directory():
         play_action_active = False
     if dialog_active or player_window or play_action_active:
         _LAST_UNSAFE_GUI = time.monotonic()
+        if window.getProperty(PENDING_REFRESH_PROPERTY):
+            _refresh_hold("dialog=%s dialog_id=%s window_id=%s player_window=%s play_action=%s" %
+                          (dialog_active, xbmcgui.getCurrentWindowDialogId(),
+                           xbmcgui.getCurrentWindowId(), player_window, play_action_active))
         return False
 
     raw = window.getProperty(PENDING_REFRESH_PROPERTY)
@@ -108,13 +130,33 @@ def _refresh_pending_directory():
     if not path or time.time() - created > PENDING_REFRESH_TTL:
         window.clearProperty(PENDING_REFRESH_PROPERTY)
         return False
-    current = xbmc.getInfoLabel("Container.FolderPath") or ""
-    if not current or _plugin_route(current) != _plugin_route(path):
+    if time.time() < float(pending.get("not_before") or 0):
         return False
+    marker = xbmc.getInfoLabel("Container.Property(Rotation.PlaylistLocation)")
+    current = marker or xbmc.getInfoLabel("Container.FolderPath") or ""
+    if not current or _plugin_route(current) != _plugin_route(path):
+        _refresh_hold("directory differs: expected=%r visible=%r marker=%r" %
+                      (path, current, marker))
+        return False
+    # The progress owner may still be closing its native dialog even after
+    # the artwork worker published completion. Wait for its shared lease.
+    progress_key = "rotation_playlist_art_" + hashlib.sha1(json.dumps(
+        (urlparse(path).netloc.casefold(), urlparse(path).path.rstrip("/").casefold(),
+         sorted((key.casefold(), sorted(v.casefold() for v in values))
+                for key, values in parse_qs(urlparse(path).query,
+                                          keep_blank_values=True).items())),
+        ensure_ascii=False).encode("utf-8")).hexdigest() + "_progress_owner"
+    try:
+        if time.time() - float(window.getProperty(progress_key).rsplit("|", 1)[-1]) < 10:
+            _refresh_hold("waiting for progress dialog to close")
+            return False
+    except (TypeError, ValueError):
+        pass
     # Context menus disappear just before their selected action opens Kodi's
     # busy dialog. Waiting briefly after every dialog/player transition closes
     # that race without treating ordinary list navigation as unsafe.
     if time.monotonic() - _LAST_UNSAFE_GUI < GUI_SETTLE_SECONDS:
+        _refresh_hold("waiting for GUI to settle")
         return False
     key = "Rotation.SafeRefresh.%s" % hashlib.sha1(
         path.encode("utf-8")).hexdigest()[:16]
@@ -137,9 +179,36 @@ def _log(message, level=xbmc.LOGINFO):
     xbmc.log("[rotation.service] %s" % message, level)
 
 
-MONITOR = xbmc.Monitor()
-while not MONITOR.abortRequested():
-    _refresh_pending_directory()
-    _maintain_playback_lookahead()
-    if MONITOR.waitForAbort(1):
-        break
+def _run_service():
+    monitor = xbmc.Monitor()
+    refresh_only = "refresh-only" in sys.argv[1:]
+    window = xbmcgui.Window(10000)
+    worker_key = "Rotation.DirectoryRefreshWorker.1.0.18"
+    token = str(time.time())
+    if refresh_only:
+        try:
+            if time.time() - float(window.getProperty(worker_key) or 0) < 10:
+                return
+        except ValueError:
+            pass
+        window.setProperty(worker_key, token)
+        _log("Independent artwork refresh worker started")
+    try:
+        while not monitor.abortRequested():
+            if refresh_only:
+                if not window.getProperty(PENDING_REFRESH_PROPERTY):
+                    break
+                token = str(time.time())
+                window.setProperty(worker_key, token)
+            _refresh_pending_directory()
+            if not refresh_only:
+                _maintain_playback_lookahead()
+            if monitor.waitForAbort(1):
+                break
+    finally:
+        if refresh_only and window.getProperty(worker_key) == token:
+            window.clearProperty(worker_key)
+
+
+
+_run_service()

@@ -13,6 +13,7 @@ import datetime
 import hashlib
 import io
 import json
+import math
 import os
 import random
 import re
@@ -28,13 +29,15 @@ import xbmc
 import xbmcgui
 import xbmcaddon
 import xbmcplugin
+import xbmcvfs
 
 from resources.lib.storage import FavoritesStore
 from resources.lib.shared_sync import SharedFavoritesStore, shared_favorites_path
 from resources.lib.user_playlists import UserPlaylistStore
+from resources.lib.playlist_import import parse_playlist, HELP as PLAYLIST_IMPORT_HELP
 from resources.lib.artwork import ArtworkProvider
 from resources.lib.library import (LibraryIndex, library_artists, library_artist_art,
-                                   library_artist_fanart,
+                                   library_artist_fanart, library_artist_logo,
                                    library_song_count, norm_artist, norm_title,
                                    primary_artist, track_identity_key, _similar)
 from resources.lib.playlists import PlaylistSource
@@ -113,7 +116,7 @@ UNAVAILABLE_AUDIO = os.path.join(MEDIA_DIR, "unavailable.mp3")
 COVER_AS_FANART = False
 
 
-def _art(cover, fanart=None, fallback=FALLBACK_ALBUM):
+def _art(cover, fanart=None, fallback=FALLBACK_ALBUM, clearlogo=""):
     """
     Build a setArt() dict from a cover image and an optional background.
 
@@ -134,7 +137,13 @@ def _art(cover, fanart=None, fallback=FALLBACK_ALBUM):
     # Artwork-led skins commonly read thumb without falling back to icon.
     # Populate both so a missing cover consistently shows Rotation's tile
     # instead of a skin-specific blank/default-album texture.
-    return {"thumb": display, "icon": display, "fanart": background}
+    result = {"thumb": display, "icon": display, "fanart": background}
+    if clearlogo:
+        # clearlogo is Kodi's standard artist-logo key.  The logo alias also
+        # helps older/custom skins which still query ListItem.Art(logo).
+        result["clearlogo"] = clearlogo
+        result["logo"] = clearlogo
+    return result
 
 if not os.path.exists(DATA_DIR):
     os.makedirs(DATA_DIR)
@@ -234,22 +243,17 @@ def _user_playlist_cover(row, regenerate=False):
     custom = str(row.get("cover_path") or "")
     if row.get("cover_mode") == "custom" and custom:
         try:
-            if __import__("xbmcvfs").exists(custom):
-                return custom
-        except Exception:
-            pass
+            if __import__("xbmcvfs").exists(custom): return custom
+        except Exception: pass
     playlist_id = str(row.get("id") or "")
     modified = float(row.get("modified") or 0)
-    # Kodi's texture cache is keyed by path, not file contents. Version the
-    # filename so an edited playlist cannot retain its original mosaic.
-    revision = str(max(0, int(modified * 1000)))
-    target = os.path.join(
-        USER_PLAYLIST_ART_DIR, "%s-%s.jpg" % (playlist_id, revision))
-    if os.path.exists(target):
-        return target
+    # Imports contain artist/title only. Use the same learned metadata and
+    # album cache as the song listing, rather than requiring persisted covers.
+    cache = _load_availability()
+    provider = _artwork_for_listing()
     sources = []
     for track in row.get("tracks", []):
-        source = track.get("cover") or ""
+        source = _playlist_display_cover(track, cache, provider)
         if source and source not in sources:
             sources.append(source)
         if len(sources) == 4:
@@ -275,6 +279,15 @@ def _user_playlist_cover(row, regenerate=False):
         except Exception as exc:
             xbmc.log("[rotation] Playlist cover library fallback failed: %s" % exc,
                      xbmc.LOGDEBUG)
+    # Include the actual sources in the filename: Kodi must see a new texture
+    # path when a partial mosaic gains artwork, even if no songs were edited.
+    signature = hashlib.sha1(json.dumps(sources, ensure_ascii=False).encode(
+        "utf-8")).hexdigest()[:16]
+    revision = "%s-%s" % (max(0, int(modified * 1000)), signature)
+    target = os.path.join(
+        USER_PLAYLIST_ART_DIR, "%s-%s.jpg" % (playlist_id, revision))
+    if os.path.exists(target) and not regenerate:
+        return target
     images = []
     try:
         resize_filter = Image.Resampling.LANCZOS
@@ -297,15 +310,11 @@ def _user_playlist_cover(row, regenerate=False):
     if len(images) == 1:
         canvas.paste(ImageOps.fit(images[0], (600, 600), method=resize_filter), (0, 0))
     elif len(images) == 2:
-        for image, position in zip(images, ((0, 0), (300, 0))):
-            canvas.paste(ImageOps.fit(image, (300, 600), method=resize_filter), position)
+        for image, position in zip(images, ((0, 0), (300, 0))): canvas.paste(ImageOps.fit(image, (300, 600), method=resize_filter), position)
     elif len(images) == 3:
-        canvas.paste(ImageOps.fit(images[0], (300, 600), method=resize_filter), (0, 0))
-        canvas.paste(images[1], (300, 0))
-        canvas.paste(images[2], (300, 300))
+        canvas.paste(ImageOps.fit(images[0], (300, 600), method=resize_filter), (0, 0)); canvas.paste(images[1], (300, 0)); canvas.paste(images[2], (300, 300))
     else:
-        for image, position in zip(images[:4], ((0, 0), (300, 0), (0, 300), (300, 300))):
-            canvas.paste(image, position)
+        for image, position in zip(images[:4], ((0, 0), (300, 0), (0, 300), (300, 300))): canvas.paste(image, position)
     temporary = target + ".tmp"
     try:
         canvas.save(temporary, "JPEG", quality=92, optimize=True)
@@ -783,6 +792,12 @@ def _same_plugin_directory(current, expected):
     return bool(current and expected and _route(current) == _route(expected))
 
 
+def _visible_playlist_location():
+    """Read this directory's marker before Kodi's skin-dependent folder label."""
+    marker = xbmc.getInfoLabel("Container.Property(Rotation.PlaylistLocation)")
+    return marker or xbmc.getInfoLabel("Container.FolderPath") or ""
+
+
 def _same_plugin_location(current, expected):
     """Compare a full plugin location, including its decoded query values."""
     def _location(value):
@@ -798,10 +813,10 @@ def _same_plugin_location(current, expected):
 
 _PENDING_REFRESH_PROPERTY = "Rotation.PendingDirectoryRefresh"
 _DEFERRED_ALARM_PROPERTY = "Rotation.DeferredRefreshAlarmUntil"
-_DEFERRED_REFRESH_MAX_AGE = 5 * 60
+_DEFERRED_REFRESH_MAX_AGE = 30 * 60
 
 
-def _queue_background_refresh(path, reason):
+def _queue_background_refresh(path, reason, service_only=False):
     """Remember one refresh and schedule a fallback independent of service.py."""
     if not path:
         return
@@ -819,9 +834,18 @@ def _queue_background_refresh(path, reason):
         window.clearProperty(_DEFERRED_ALARM_PROPERTY)
         return
     payload = {"path": path, "reason": reason, "created": created}
+    if service_only:
+        payload["not_before"] = now + 5
     window.setProperty(
         _PENDING_REFRESH_PROPERTY,
         json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
+    if service_only:
+        # Run the service script in a separate invocation even after an update
+        # stopped Kodi's startup service. Never re-enter default.py to redraw.
+        service_path = os.path.join(translatePath(addon.getAddonInfo("path")),
+                                    "resources", "lib", "artwork_refresh_1_0_18.py")
+        xbmc.executebuiltin('RunScript("%s",refresh-only)' % service_path)
+        return
     # Kodi can leave the old service process stopped after an in-place add-on
     # update. A silent RunPlugin alarm gives every queued refresh a second,
     # self-contained path without opening a directory busy dialog.
@@ -857,7 +881,7 @@ def _safe_background_refresh(path, reason="background update", cooldown=15,
     """
     if not path:
         return False
-    if not _same_plugin_directory(xbmc.getInfoLabel("Container.FolderPath"), path):
+    if not _same_plugin_location(_visible_playlist_location(), path):
         _queue_background_refresh(path, reason)
         return False
     if xbmc.Player().isPlayingAudio() and not allow_audio:
@@ -866,12 +890,18 @@ def _safe_background_refresh(path, reason="background update", cooldown=15,
     # Kodi window aliases differ between platforms/skins. Numeric IDs are
     # stable and getCurrentWindowDialogId also catches dialogs a skin creates.
     try:
-        dialog_active = xbmcgui.getCurrentWindowDialogId() != 0
+        dialog_active = (xbmc.getCondVisibility("System.HasActiveModalDialog") or
+                         xbmcgui.getCurrentWindowDialogId() in (10106, 10138, 10160, 12000))
         player_window = xbmcgui.getCurrentWindowId() in (12005, 12006)
     except (AttributeError, RuntimeError):
         dialog_active = xbmc.getCondVisibility("System.HasActiveModalDialog")
         player_window = False
-    if dialog_active or player_window:
+    try:
+        play_action_active = time.time() < float(
+            xbmcgui.Window(10000).getProperty("Rotation.PlayActionUntil") or 0)
+    except (TypeError, ValueError):
+        play_action_active = False
+    if dialog_active or player_window or play_action_active:
         xbmc.log("[rotation] Skipped %s refresh while a dialog is active" % reason,
                  xbmc.LOGDEBUG)
         _queue_background_refresh(path, reason)
@@ -908,6 +938,8 @@ def deferred_directory_refresh():
             _PENDING_REFRESH_PROPERTY) or "{}")
     except (TypeError, ValueError):
         pending = {}
+    if pending.get("not_before"):
+        return
     path = pending.get("path") or ""
     created = float(pending.get("created") or 0)
     if not path or time.time() - created > _DEFERRED_REFRESH_MAX_AGE:
@@ -981,9 +1013,10 @@ def _artist_thumbs(names, queue_missing=True, refresh_path=None):
             continue
         try:
             cached = provider.artist_thumb_cached(name)
+            logo = provider.artist_logo_cached(name)
         except Exception:
             continue
-        if cached is None:
+        if cached is None or logo is None:
             pending.append(name)
         elif cached:
             thumbs[name] = cached
@@ -1006,18 +1039,22 @@ def _artist_thumbs(names, queue_missing=True, refresh_path=None):
 
 
 def _queue_artist_backgrounds(names, path):
-    """Resolve uncached non-library fanart even when a thumb already exists."""
-    if not _artwork_backgrounds_enabled():
+    """Resolve uncached non-library fanart/logos even when a thumb exists."""
+    if not _artwork_artists_enabled():
         return
     provider = _artwork_for_listing()
     if not provider:
         return
     pending = []
     for name in names:
-        if not name or library_artist_fanart(name):
+        if not name:
             continue
         try:
-            if provider.artist_background_cached(name) is None:
+            background_done = (bool(library_artist_fanart(name)) or
+                               provider.artist_background_cached(name) is not None)
+            logo_done = (bool(library_artist_logo(name)) or
+                         provider.artist_logo_cached(name) is not None)
+            if not background_done or not logo_done:
                 pending.append(name)
         except Exception:
             continue
@@ -1041,7 +1078,8 @@ def _ensure_artist_art(artist):
     if not provider:
         return
     try:
-        if provider.artist_thumb_cached(artist) is not None:
+        if (provider.artist_thumb_cached(artist) is not None and
+                provider.artist_logo_cached(artist) is not None):
             return
     except Exception:
         return
@@ -1162,6 +1200,22 @@ def _cached_background(artist):
         return ""
 
 
+def _cached_logo(artist):
+    """Library-first artist clearlogo lookup without blocking the UI."""
+    if not artist:
+        return ""
+    local = library_artist_logo(artist)
+    if local:
+        return local
+    provider = _artwork_for_listing()
+    if not provider:
+        return ""
+    try:
+        return provider.artist_logo_cached(artist) or ""
+    except Exception:
+        return ""
+
+
 _PLAYLIST_ART_ACTIVE = set()
 _PLAYLIST_ART_LOCK = threading.Lock()
 _PLAYLIST_PROGRESS_ACTIVE = set()
@@ -1169,7 +1223,13 @@ _PLAYLIST_PROGRESS_LOCK = threading.Lock()
 
 
 def _playlist_art_key(path):
-    return "rotation_playlist_art_" + hashlib.sha1(path.encode("utf-8")).hexdigest()
+    parsed = urlparse(path)
+    location = (parsed.netloc.casefold(), parsed.path.rstrip("/").casefold(),
+                sorted((key.casefold(), sorted(v.casefold() for v in values))
+                       for key, values in parse_qs(
+                           parsed.query, keep_blank_values=True).items()))
+    return "rotation_playlist_art_" + hashlib.sha1(
+        json.dumps(location, ensure_ascii=False).encode("utf-8")).hexdigest()
 
 
 def _playlist_art_state_key(path, suffix):
@@ -1189,36 +1249,71 @@ def _show_playlist_progress(path, folder):
     scan_key = _playlist_scan_key(folder) if folder else ""
     if not window.getProperty(art_key) and not (scan_key and window.getProperty(scan_key)):
         return
+    # Module locks do not cover Kodi's separate Python invocations. All
+    # directory rebuilds must share one native progress-dialog owner.
+    owner_key = art_key + "_progress_owner"
     with _PLAYLIST_PROGRESS_LOCK:
-        if path in _PLAYLIST_PROGRESS_ACTIVE:
+        if art_key in _PLAYLIST_PROGRESS_ACTIVE:
             return
-        _PLAYLIST_PROGRESS_ACTIVE.add(path)
+        try:
+            if time.time() - float(window.getProperty(owner_key).rsplit("|", 1)[-1]) < 10:
+                return
+        except (TypeError, ValueError):
+            pass
+        owner_token = str(time.time())
+        window.setProperty(owner_key, owner_token + "|" + str(time.time()))
+        _PLAYLIST_PROGRESS_ACTIVE.add(art_key)
 
     def _work():
         dialog = None
         last = None
         away_since = None
+        seen_playlist = False
         was_scanning = False
         last_scan = (0, 0, 0)
         last_art_total = 0
+        phase_finished_since = None
         monitor = xbmc.Monitor()
         try:
             while not monitor.abortRequested():
-                current = xbmc.getInfoLabel("Container.FolderPath")
-                if current != path:
+                if not window.getProperty(owner_key).startswith(owner_token + "|"):
+                    break
+                window.setProperty(owner_key, owner_token + "|" + str(time.time()))
+                current = _visible_playlist_location()
+                at_playlist = _same_plugin_location(current, path)
+                if not at_playlist:
                     if away_since is None:
                         away_since = time.monotonic()
                     # A refresh can briefly clear FolderPath; tolerate that.
-                    if time.monotonic() - away_since >= 3:
+                    if time.monotonic() - away_since >= (3 if seen_playlist else 30):
+                        xbmc.log("[rotation] Playlist progress left directory: expected=%r visible=%r" %
+                                 (path, current), xbmc.LOGINFO)
                         break
                 else:
+                    seen_playlist = True
                     away_since = None
 
                 scan = window.getProperty(scan_key) if scan_key else ""
                 art = window.getProperty(art_key)
-                scan_done = bool(folder and window.getProperty(_playlist_scan_done_key(folder)))
+                completed_scan = window.getProperty(_playlist_scan_done_key(folder)) if folder else ""
+                scan_done = bool(completed_scan)
+                if not scan and "/" in completed_scan:
+                    try:
+                        last_scan = tuple(int(n) for n in completed_scan.split("/"))
+                    except ValueError:
+                        pass
                 if not scan and not art:
-                    break
+                    # Availability completion and artwork reservation occur
+                    # in different invocations. Keep the same dialog through
+                    # that short handoff rather than close and reopen it.
+                    if phase_finished_since is None:
+                        phase_finished_since = time.monotonic()
+                    if time.monotonic() - phase_finished_since >= 2:
+                        break
+                    if monitor.waitForAbort(0.1):
+                        break
+                    continue
+                phase_finished_since = None
                 # Text states reserve the worker but contain no real counts.
                 # Never turn them into a synthetic Songs 0/0 display.  The
                 # availability worker will publish numeric counts after the
@@ -1257,10 +1352,12 @@ def _show_playlist_progress(path, folder):
                 if art or (scan and last_art_total):
                     details.append("Artists %d/%d" % (a_checked, a_total))
                 state = (heading, " · ".join(details), progress)
-                if state != last and current == path:
+                if state != last and at_playlist:
                     if dialog is None:
                         dialog = xbmcgui.DialogProgressBG()
                         dialog.create(plugin.name, heading)
+                        xbmc.log("[rotation] Playlist progress opened: %s" % path,
+                                 xbmc.LOGINFO)
                     dialog.update(progress, heading, state[1])
                     last = state
                 if monitor.waitForAbort(0.4):
@@ -1268,22 +1365,26 @@ def _show_playlist_progress(path, folder):
         finally:
             if dialog:
                 dialog.close()
+            # Release only after native dialog.close has returned, so the
+            # independent redraw never overlaps progress-dialog teardown.
+            if window.getProperty(owner_key).startswith(owner_token + "|"):
+                window.clearProperty(owner_key)
             with _PLAYLIST_PROGRESS_LOCK:
-                _PLAYLIST_PROGRESS_ACTIVE.discard(path)
+                _PLAYLIST_PROGRESS_ACTIVE.discard(art_key)
 
     thread = threading.Thread(target=_work, name="rotation-playlist-progress")
     thread.daemon = True
     thread.start()
 
 
-def _playlist_backgrounds(artists, path, folder=""):
+def _playlist_backgrounds(artists, path, folder="", refresh=True, background=True):
     """Fill missing artist backgrounds without delaying playlist browsing.
 
     The artwork provider retains its normal fanart.tv vote ranking. Work from
     the full provider list so refreshes cannot change the progress total.
     """
     provider = _artwork_for_listing()
-    if not provider or not provider.want_backgrounds or not path:
+    if not provider or not path or not _artwork_artists_enabled():
         return
     names = [name for name in dict.fromkeys(artists) if name]
     window = xbmcgui.Window(10000)
@@ -1295,10 +1396,15 @@ def _playlist_backgrounds(artists, path, folder=""):
     for artist in names:
         if not artist:
             continue
-        if library_artist_fanart(artist):
-            continue
         try:
-            if provider.artist_background_cached(artist) is None:
+            background_missing = (provider.want_backgrounds and
+                                  not library_artist_fanart(artist) and
+                                  provider.artist_background_cached(artist) is None)
+            thumb_missing = (not library_artist_art(artist).get("thumb") and
+                             provider.artist_thumb_cached(artist) is None)
+            logo_missing = (not library_artist_logo(artist) and
+                            provider.artist_logo_cached(artist) is None)
+            if background_missing or thumb_missing or logo_missing:
                 pending.append(artist)
         except Exception as exc:
             xbmc.log("[rotation] Playlist artwork cache check failed for %r: %s"
@@ -1323,7 +1429,6 @@ def _playlist_backgrounds(artists, path, folder=""):
         _PLAYLIST_ART_ACTIVE.add(path)
         window.setProperty(running_key, str(time.time()))
         window.clearProperty(done_key)
-    scan_key = _playlist_scan_key(folder) if folder else ""
     window.setProperty(art_key, "0/%d" % len(pending))
 
     def _refresh():
@@ -1332,6 +1437,7 @@ def _playlist_backgrounds(artists, path, folder=""):
     def _work():
         worker = None
         changed = 0
+        backgrounds = 0
         completed = False
         try:
             worker = _make_artwork()
@@ -1342,7 +1448,10 @@ def _playlist_backgrounds(artists, path, folder=""):
                 if monitor.abortRequested():
                     break
                 try:
-                    if worker.artist_background(artist):
+                    art = worker.artist_art(artist)
+                    if art.get("fanart"):
+                        backgrounds += 1
+                    if any(art.get(key) for key in ("thumb", "fanart", "clearlogo")):
                         changed += 1
                 except Exception as exc:
                     xbmc.log("[rotation] Playlist background failed for %r: %s"
@@ -1351,20 +1460,26 @@ def _playlist_backgrounds(artists, path, folder=""):
                 window.setProperty(running_key, str(time.time()))
             completed = not monitor.abortRequested()
             xbmc.log("[rotation] Playlist artist backgrounds: %d of %d found"
-                     % (changed, len(pending)), xbmc.LOGINFO)
-            # The availability scan already refreshes in chunks. Artwork gets
-            # one final refresh of its own only when that scan is idle.
-            if changed and not (scan_key and window.getProperty(scan_key)):
-                _refresh()
+                     % (backgrounds, len(pending)), xbmc.LOGINFO)
         finally:
             if completed:
                 window.setProperty(done_key, "%s:%s" % (fingerprint, time.time()))
-            window.clearProperty(art_key)
+            if background:
+                window.clearProperty(art_key)
             window.clearProperty(running_key)
             if worker:
                 worker.close()
             with _PLAYLIST_ART_LOCK:
                 _PLAYLIST_ART_ACTIVE.discard(path)
+            # Publish completion before the new plugin invocation can begin.
+            # Even thumbnail-only hits need a redraw; absent fanart is normal.
+            if changed and refresh:
+                _refresh()
+
+        return bool(changed)
+
+    if not background:
+        return _work()
 
     thread = threading.Thread(target=_work, name="rotation-playlist-art")
     thread.daemon = True
@@ -1873,9 +1988,9 @@ def _library_artist_groups():
 def _artist_navigation_context():
     return [
         ("⌂  Artists Home",
-         "Container.Update(%s,replace)" % plugin.url_for(artists_root)),
+         "Container.Update(%s)" % plugin.url_for(artists_root)),
         ("⌂  Rotation Home",
-         "Container.Update(%s,replace)" % plugin.url_for(index)),
+         "Container.Update(%s)" % plugin.url_for(index)),
     ]
 
 
@@ -1939,7 +2054,8 @@ def _render_artists(rows, heading="Artists"):
         count = len(row.get("songs", []))
         if count:
             li.setLabel2("%d song%s in library" % (count, "" if count == 1 else "s"))
-        li.setArt(_art(thumb, fanart, FALLBACK_ARTIST))
+        li.setArt(_art(thumb, fanart, FALLBACK_ARTIST,
+                       art.get("clearlogo") or _cached_logo(name)))
         # Match Favorite Artists: skins use the music tag's artist identity
         # to resolve library extras such as clearlogo and clearart.
         _set_music_tag(li, title=name, artist=name)
@@ -2014,10 +2130,9 @@ def artists_library(mode):
         rows.sort(key=lambda row: row["name"].casefold())
     elif mode == "random":
         if rows:
-            row = random.choice(rows)
-            xbmc.executebuiltin("Container.Update(%s)" % _artist_page_url(row["name"]))
-        if plugin.handle >= 0:
-            xbmcplugin.endOfDirectory(plugin.handle, succeeded=bool(rows))
+            _open_artist_after_selection(random.choice(rows)["name"])
+        elif plugin.handle >= 0:
+            xbmcplugin.endOfDirectory(plugin.handle, succeeded=False)
         return
     elif mode == "recent_added":
         rows.sort(key=lambda row: row["dateadded"], reverse=True)
@@ -2101,6 +2216,24 @@ def artists_discover_root():
     xbmcplugin.endOfDirectory(plugin.handle, cacheToDisc=False)
 
 
+def _open_artist_after_selection(artist):
+    """Leave the current directory intact while dismissing an action dialog."""
+    if plugin.handle >= 0:
+        xbmcplugin.endOfDirectory(plugin.handle, succeeded=False, cacheToDisc=False)
+    opener = plugin.url_for(artists_open_selected) + "?artist=" + quote(artist, safe="")
+    opener += _navigation_origin_query()
+    _schedule_playlist_action(opener, "RotationArtistOpen")
+
+
+@plugin.route("/artists/open_selected")
+def artists_open_selected():
+    if not _navigation_request_is_current():
+        return
+    artist = unquote(plugin.args.get("artist", [""])[0]).strip()
+    if artist:
+        xbmc.executebuiltin("Container.Update(%s)" % _artist_page_url(artist))
+
+
 @plugin.route("/artists/discover/<mode>")
 def artists_discover(mode):
     if mode in ("library", "rediscover") and not _use_kodi_library():
@@ -2115,8 +2248,9 @@ def artists_discover(mode):
     if mode == "search":
         seed = xbmcgui.Dialog().input("Search for an Artist", type=xbmcgui.INPUT_ALPHANUM)
         if seed:
-            xbmc.executebuiltin("Container.Update(%s)" % _artist_page_url(seed))
-        xbmcplugin.endOfDirectory(plugin.handle, succeeded=bool(seed))
+            _open_artist_after_selection(seed)
+        elif plugin.handle >= 0:
+            xbmcplugin.endOfDirectory(plugin.handle, succeeded=False)
         return
     if mode == "favorite":
         favorites_rows = _favorites().get_favorites(kind="artist")
@@ -2190,7 +2324,8 @@ def artists_page():
         if label == "Songs in Your Library":
             count = local_song_count
             li.setLabel2("%d song%s" % (count, "" if count == 1 else "s"))
-        li.setArt(_art(art.get("thumb") or icon, fanart, icon))
+        li.setArt(_art(art.get("thumb") or icon, fanart, icon,
+                       art.get("clearlogo") or _cached_logo(name)))
         _set_music_tag(li, title=label, artist=name)
         li.addContextMenuItems(_artist_navigation_context(), replaceItems=False)
         xbmcplugin.addDirectoryItem(plugin.handle, url, li, is_folder)
@@ -2778,7 +2913,11 @@ def favorites(kind):
             "song":   FALLBACK_ALBUM,
         }.get(kind, FALLBACK_ALBUM)
         li.setArt(_art(_favorite_cover, _cached_background(_favorite_name),
-                       fallback=_favorite_fallback))
+                       fallback=_favorite_fallback,
+                       clearlogo=(
+                           _favorite_library_art.get(_favorite_name, {}).get("clearlogo")
+                           if kind == "artist" else "") or
+                       _cached_logo(_favorite_name)))
         _set_music_tag(li, title=f["label"], artist=f["artist"], album=f["album"])
         remove_url = plugin.url_for(favorite_remove) + "?url=" + quote(f["url"], safe="")
         li.addContextMenuItems([
@@ -2931,7 +3070,8 @@ def shuffle_favorites():
             continue
         url = local["file"]
         li = xbmcgui.ListItem(f["label"], path=url)
-        li.setArt(_art(f["thumb"], _cached_background(f["artist"])))
+        li.setArt(_art(f["thumb"], _cached_background(f["artist"]),
+                       clearlogo=_cached_logo(f["artist"])))
         _set_music_tag(li, title=f["label"], artist=f["artist"], album=f["album"])
         playlist.add(url, li)
 
@@ -3235,11 +3375,24 @@ def _library_radio_context(mode, value, label, include_favorite=True):
     return context
 
 
+def _navigation_origin_query():
+    origin = xbmc.getInfoLabel("Container.FolderPath") or ""
+    return "&origin=" + quote(origin, safe="")
+
+
+def _navigation_request_is_current():
+    """Discard a delayed redirect if Back already left its source screen."""
+    origin = unquote(plugin.args.get("origin", [""])[0])
+    return not origin or _same_plugin_location(
+        xbmc.getInfoLabel("Container.FolderPath"), origin)
+
+
 def _open_library_radio(mode, value=""):
     if plugin.handle >= 0:
-        xbmcplugin.endOfDirectory(plugin.handle)
+        xbmcplugin.endOfDirectory(plugin.handle, succeeded=False, cacheToDisc=False)
     target = _library_radio_folder_url(mode, value)
     url = plugin.url_for(library_radio_open) + "?target=" + quote(target, safe="")
+    url += _navigation_origin_query()
     _schedule_playlist_action(url, "RotationLibraryRadioOpen")
 
 
@@ -3341,6 +3494,20 @@ def _snapshot_default_name(store, kind, arg, label):
     while ("%s (%d)" % (candidate, number)).casefold() in existing:
         number += 1
     return "%s (%d)" % (candidate, number)
+
+
+def _album_playlist_default_name(store, entries, label="", artist=""):
+    """Use the album artist rather than a guest singer for an editable name."""
+    album = next((str(entry.get("album") or "").strip() for entry in entries
+                  if str(entry.get("album") or "").strip()), "")
+    album_artist = next((str(entry.get("album_artist") or "").strip()
+                         for entry in entries
+                         if str(entry.get("album_artist") or "").strip()), "")
+    artist = album_artist or str(artist or "").strip() or next(
+        (str(entry.get("artist") or "").strip() for entry in entries
+         if str(entry.get("artist") or "").strip()), "")
+    base = "%s — %s" % (artist, album) if artist and album else album or label
+    return _snapshot_default_name(store, "deezer_album", "", base)
 
 
 def _refresh_user_playlist(playlist_id, reason="user playlist edited"):
@@ -3520,7 +3687,8 @@ def _playlist_listitem(song, position=0, cover=""):
 
     li = xbmcgui.ListItem(label, path=song["file"])
     li.setLabel2(artist)
-    li.setArt(_art(thumb, _cached_background(artist)))
+    li.setArt(_art(thumb, _cached_background(artist),
+                   clearlogo=_cached_logo(artist)))
     li.setProperty("IsPlayable", "true")
     li.setProperty("Rotation.Availability", "available")
     _set_music_tag(li,
@@ -3685,7 +3853,7 @@ def _playlist_metadata_policy(entries):
     return prepared
 
 
-def _playlist_stream_metadata(entries, cache, path):
+def _playlist_stream_metadata(entries, cache, path, refresh=True, background=True):
     """Enrich album-less streaming rows in the background through Deezer."""
     if not _musicmp3_enabled() or not path:
         return
@@ -3785,7 +3953,8 @@ def _playlist_stream_metadata(entries, cache, path):
             # Publish completion before refreshing.  The replacement plugin
             # invocation can begin immediately after executebuiltin returns.
             window.setProperty(done_key, "%s:%s" % (fingerprint, time.time()))
-            if changed:
+            if changed and refresh:
+                _playlist_covers(pending, latest, path)
                 _safe_background_refresh(path, "stream metadata")
         finally:
             if not completed:
@@ -3793,6 +3962,11 @@ def _playlist_stream_metadata(entries, cache, path):
             window.clearProperty(running_key)
             with _PLAYLIST_METADATA_LOCK:
                 _PLAYLIST_METADATA_ACTIVE.discard(path)
+
+        return bool(changed)
+
+    if not background:
+        return _work()
 
     thread = threading.Thread(target=_work, name="rotation-stream-metadata")
     thread.daemon = True
@@ -3812,10 +3986,100 @@ def _playlist_display_cover(entry, cache, provider=None):
         except Exception as exc:
             xbmc.log("[rotation] Playlist cover cache read failed for %r / %r: %s"
                      % (artist, album, exc), xbmc.LOGWARNING)
-    return entry.get("cover", "") or match.get("image", "")
+    return (entry.get("cover", "") or match.get("cover", "") or
+            match.get("image", ""))
 
 
-def _playlist_covers(entries, cache, path, folder=""):
+def _start_playlist_artwork(entries, tracks, path, folder="", force_refresh=False, artist=""):
+    """Run all artwork stages off the UI thread and publish one final redraw."""
+    if not path or not _artwork_for_listing():
+        return False
+    local_entries = [entry for song, entry in tracks if song]
+    fingerprint = hashlib.sha1(json.dumps({
+        "entries": sorted(_availability_key(entry) for entry in entries),
+        "local": sorted(_availability_key(entry) for entry in local_entries),
+    }, sort_keys=True).encode("utf-8")).hexdigest()
+    window = xbmcgui.Window(10000)
+    force_key = _playlist_art_state_key(path, "batch_refresh_needed")
+    if force_refresh:
+        window.setProperty(force_key, "1")
+    done_key = _playlist_art_state_key(path, "batch_done")
+    try:
+        prior, stamp = window.getProperty(done_key).split(":", 1)
+        if (prior == fingerprint and time.time() - float(stamp) < 900
+                and not force_refresh):
+            return True
+    except (TypeError, ValueError):
+        pass
+    batch_key = _playlist_art_state_key(path, "batch_running")
+    try:
+        if time.time() - float(window.getProperty(batch_key) or 0) < 1800:
+            _show_playlist_progress(path, folder)
+            return True
+    except (TypeError, ValueError):
+        pass
+    window.setProperty(batch_key, str(time.time()))
+    xbmc.log("[rotation] Playlist artwork pass started: %s" % path, xbmc.LOGINFO)
+    artwork_entries = (_playlist_metadata_policy(entries)
+                       if _musicmp3_enabled() else local_entries)
+    local_keys = {_availability_key(entry) for entry in local_entries}
+    remote_entries = [entry for entry in artwork_entries
+                      if _availability_key(entry) not in local_keys]
+    names = [entry.get("artist", "") for entry in artwork_entries]
+    names += [song.get("artist", "") for song, _ in tracks if song]
+    if artist:
+        names.append(artist)
+    art_key = _playlist_art_key(path)
+    window.setProperty(art_key, "0/%d" % max(1, len(set(names))))
+    _show_playlist_progress(path, folder)
+
+    def _work():
+        changed = False
+        completed = False
+        monitor = xbmc.Monitor()
+        try:
+            # Metadata must finish first: it supplies missing album names to
+            # the cover stage. No individual stage is allowed to redraw.
+            changed |= bool(_playlist_stream_metadata(
+                remote_entries, _load_availability(), path,
+                refresh=False, background=False))
+            if monitor.abortRequested():
+                return
+            changed |= bool(_playlist_covers(
+                artwork_entries, _load_availability(), path, folder,
+                refresh=False, background=False))
+            if monitor.abortRequested():
+                return
+            changed |= bool(_playlist_backgrounds(
+                names, path, folder, refresh=False, background=False))
+            completed = not monitor.abortRequested()
+        except Exception as exc:
+            xbmc.log("[rotation] Playlist artwork pass failed: %s" % exc,
+                     xbmc.LOGWARNING)
+        finally:
+            if completed:
+                # Publish before redraw so transient misses cannot start an
+                # automatic lookup/refresh loop in the replacement directory.
+                window.setProperty(done_key, "%s:%s" % (fingerprint, time.time()))
+            window.clearProperty(batch_key)
+            window.clearProperty(art_key)
+        refresh_needed = bool(window.getProperty(force_key))
+        if completed:
+            window.clearProperty(force_key)
+        if (changed or refresh_needed) and completed:
+            xbmc.log("[rotation] Playlist artwork pass complete; one redraw queued",
+                     xbmc.LOGINFO)
+            # Refreshing from this worker can block a reused Python invoker.
+            # The independent service waits for this invocation to exit first.
+            _queue_background_refresh(path, "playlist artwork complete", service_only=True)
+
+    thread = threading.Thread(target=_work, name="rotation-playlist-artwork-pass")
+    thread.daemon = True
+    thread.start()
+    return True
+
+
+def _playlist_covers(entries, cache, path, folder="", refresh=True, background=True):
     """Resolve missing playlist album covers without delaying the directory.
 
     Last.fm radio rows generally have no album name.  The availability scan
@@ -3876,7 +4140,7 @@ def _playlist_covers(entries, cache, path, folder=""):
                 changed += hits
             xbmc.log("[rotation] Playlist album covers: %d of %d found"
                      % (changed, len(pairs)), xbmc.LOGINFO)
-            if changed:
+            if changed and refresh:
                 _safe_background_refresh(path, "playlist album covers")
         except Exception as exc:
             xbmc.log("[rotation] Playlist cover worker failed: %s" % exc,
@@ -3886,6 +4150,11 @@ def _playlist_covers(entries, cache, path, folder=""):
                 worker.close()
             with _PLAYLIST_COVER_LOCK:
                 _PLAYLIST_COVER_ACTIVE.discard(path)
+
+        return bool(changed)
+
+    if not background:
+        return _work()
 
     thread = threading.Thread(target=_work, name="rotation-playlist-covers")
     thread.daemon = True
@@ -4561,7 +4830,8 @@ def _resolved_remote_listitem(entry, url, position=0):
     """Create a playable item whose URL has already passed preflight."""
     artist, title = entry.get("artist", ""), entry.get("title", "")
     li = xbmcgui.ListItem(title, path=url)
-    li.setArt(_art(entry.get("cover", ""), _cached_background(artist)))
+    li.setArt(_art(entry.get("cover", ""), _cached_background(artist),
+                   clearlogo=_cached_logo(artist)))
     li.setMimeType("audio/mpeg")
     li.setContentLookup(False)
     _set_music_tag(li, title=title, artist=artist,
@@ -4619,7 +4889,8 @@ def _playlist_remote_listitem(entry, position=0, cover=""):
     li = xbmcgui.ListItem("%s — %s" % (artist, title), path=url)
     li.setLabel2(artist)
     li.setArt(_art(cover or entry.get("cover", ""),
-                   _cached_background(artist)))
+                   _cached_background(artist),
+                   clearlogo=_cached_logo(artist)))
     li.setProperty("IsPlayable", "true")
     _set_music_tag(li, title=title, artist=artist,
                    album=entry.get("album", ""),
@@ -4639,7 +4910,8 @@ def _playlist_unavailable_listitem(entry, position=0, cover=""):
     li = xbmcgui.ListItem(label, path=url)
     li.setLabel2(artist)
     li.setArt(_art(cover or entry.get("cover", ""),
-                   _cached_background(artist)))
+                   _cached_background(artist),
+                   clearlogo=_cached_logo(artist)))
     li.setProperty("Rotation.Availability", "missing")
     if _musicmp3_enabled():
         li.setProperty("IsPlayable", "true")
@@ -4680,7 +4952,60 @@ def _playlist_summary(entries):
     return "%s • %s" % (count_label, runtime)
 
 
-def _add_playlist_summary(entries, tracks=None, availability_complete=False):
+def _remember_playlist_summary_art(kind, arg, cover="", artist=""):
+    """Remember the selected tile without changing playlist URLs or tracks."""
+    if cover or artist:
+        _make_playlists(quiet=True).cache.put(
+            "summary-art-v1:%s:%s" % (kind, arg),
+            {"cover": cover or "", "artist": artist or ""})
+
+
+def _playlist_artist_summary_art(artist):
+    """Read artist artwork from the library first, then existing caches."""
+    local = library_artist_art(artist) or {}
+    thumb = local.get("thumb", "")
+    provider = _artwork_for_listing()
+    if not thumb and provider:
+        try:
+            thumb = provider.artist_thumb_cached(artist) or ""
+        except Exception as exc:
+            xbmc.log("[rotation] Summary artist cache unavailable: %s" % exc, xbmc.LOGDEBUG)
+    return _art(thumb, _cached_background(artist), FALLBACK_ARTIST,
+                clearlogo=_cached_logo(artist))
+
+
+def _playlist_summary_art(kind, arg, entries):
+    """Use playlist-level art, never an arbitrary song from a mixed station."""
+    if kind in ("radio", "artist_top"):
+        return _playlist_artist_summary_art(str(arg))
+    if kind == "user":
+        row = _user_playlists().get(str(arg))
+        return _art(_user_playlist_cover(row) if row else "", FANART, ICON_PLAYLISTS)
+    descriptor = _make_playlists(quiet=True).cache.get_stale(
+        "summary-art-v1:%s:%s" % (kind, arg)) or {}
+    cover = descriptor.get("cover", "")
+    artist = descriptor.get("artist", "")
+    if kind == "editorial" and not cover:
+        # Older followed playlists already retain their original cover, even
+        # if their discovery page has not been opened in this installation.
+        target = plugin.url_for(playlists_editorial_tracks, str(arg))
+        for favorite in _favorites().get_favorites(kind="playlist"):
+            if _same_plugin_directory(favorite.get("url", ""), target):
+                cover = favorite.get("thumb", "")
+                break
+    if kind == "deezer_album":
+        entry = entries[0] if entries else {}
+        artist = artist or entry.get("album_artist") or entry.get("artist", "")
+        cover = cover or _playlist_display_cover(
+            entry, _load_availability(), _artwork_for_listing())
+        if artist.casefold() in ("various artists", "various"):
+            artist = ""
+    return _art(cover, _cached_background(artist) if artist else FANART,
+                ICON_PLAYLISTS if kind in ("editorial", "user") else ICON_SONGS,
+                clearlogo=_cached_logo(artist) if artist else "")
+
+
+def _add_playlist_summary(entries, tracks=None, availability_complete=False, artwork=None, context_menu=None):
     """Add cross-skin target and playable totals above a track listing."""
     count = len(entries)
     label = "Target: %d song%s" % (count, "" if count == 1 else "s")
@@ -4703,16 +5028,20 @@ def _add_playlist_summary(entries, tracks=None, availability_complete=False):
         label += " | Streaming"
     summary = xbmcgui.ListItem(label)
     summary.setLabel2("Playlist information")
-    summary.setArt({"icon": ICON_SONGS, "fanart": FANART})
+    summary.setArt(artwork or _art("", FANART, ICON_SONGS))
+    if context_menu:
+        summary.addContextMenuItems(context_menu, replaceItems=False)
     summary.setProperty("IsPlayable", "false")
     xbmcplugin.addDirectoryItem(plugin.handle, "", summary, False)
 
 
-def _add_library_radio_summary(tracks):
+def _add_library_radio_summary(tracks, artwork=None, context_menu=None):
     """Describe a fully local mix without redundant target/availability text."""
     summary = xbmcgui.ListItem("Library Radio: %s" % _playlist_summary(tracks))
     summary.setLabel2("All tracks are in your Kodi music library")
-    summary.setArt({"icon": ICON_SONGS, "fanart": FANART})
+    summary.setArt(artwork or _art("", FANART, ICON_SONGS))
+    if context_menu:
+        summary.addContextMenuItems(context_menu, replaceItems=False)
     summary.setProperty("IsPlayable", "false")
     xbmcplugin.addDirectoryItem(plugin.handle, "", summary, False)
 
@@ -4743,6 +5072,8 @@ def _render_playlist(kind, arg, heading, entries=None, building=False):
     allow_christmas = (kind == "user" or
                        (kind == "tag" and _is_christmas_selection(arg)))
     folder = _playlist_folder_url(kind, arg)
+    listing_path = folder or _current_plugin_path()
+    xbmcplugin.setProperty(plugin.handle, "Rotation.PlaylistLocation", listing_path)
     cache = _load_availability()
     art_provider = _artwork_for_listing()
     candidates = list(_playlist_tracks(
@@ -4783,18 +5114,30 @@ def _render_playlist(kind, arg, heading, entries=None, building=False):
     availability_complete = not building and not needs_scan and not scan_status
     playable_count = sum(1 for song, _ in tracks if song)
 
-    # Kodi skins choose their own section heading and many deliberately show
-    # the content type ("Songs") before PluginCategory. A real directory row
-    # is therefore the only dependable cross-skin place for playlist totals.
-    _add_playlist_summary(entries, tracks, availability_complete)
-
+    summary_context = context + radio_context
     if kind == "user":
-        edit_url = (plugin.url_for(user_playlist_manage)
-                    + "?playlist_id=" + quote(str(arg), safe=""))
-        edit = xbmcgui.ListItem("Edit Playlist")
-        edit.setLabel2("Rename, reorder, remove, sort or delete")
-        edit.setArt({"icon": ICON_PLAYLISTS, "fanart": FANART})
-        xbmcplugin.addDirectoryItem(plugin.handle, edit_url, edit, False)
+        summary_context += _playlist_management_context(str(arg))
+
+    # Non-discovery playlist pages hide confirmed misses from their song rows,
+    # so calculate completion from the full provider list rather than only the
+    # visible rows.
+    missing_entries = [entry for song, entry in candidates if not song]
+    if (show_unavailable and availability_complete and missing_entries
+            and _unavailable_report_enabled()):
+        report = _load_unavailable_report()
+        already_recorded = all(
+            heading in _unavailable_sources(
+                report.get(_availability_key(entry), {}))
+            for entry in missing_entries)
+        if not already_recorded:
+            count = len(missing_entries)
+            summary_context.append((
+                "Add Missing Tracks to Library Report (%d)" % count,
+                "RunPlugin(%s)" % _playlist_report_missing_url(kind, arg, heading)))
+
+    _add_playlist_summary(entries, tracks, availability_complete,
+                          artwork=_playlist_summary_art(kind, arg, entries),
+                          context_menu=summary_context)
 
     if (show_unavailable and availability_complete and tracks and
             not playable_count and not _musicmp3_enabled()):
@@ -4815,27 +5158,6 @@ def _render_playlist(kind, arg, heading, entries=None, building=False):
             _current_plugin_path().encode("utf-8")).hexdigest()[:16]
         window.clearProperty(notice_key)
 
-    # Non-discovery playlist pages hide confirmed misses from their song rows,
-    # so calculate completion from the full provider list rather than only the
-    # visible rows.
-    missing_entries = [entry for song, entry in candidates if not song]
-    if (show_unavailable and availability_complete and missing_entries
-            and _unavailable_report_enabled()):
-        report = _load_unavailable_report()
-        already_recorded = all(
-            heading in _unavailable_sources(
-                report.get(_availability_key(entry), {}))
-            for entry in missing_entries)
-        if not already_recorded:
-            count = len(missing_entries)
-            li = xbmcgui.ListItem(
-                "Add Missing Tracks to Library Report (%d)" % count)
-            li.setLabel2("Adds this page only when you choose it")
-            li.setArt({"icon": ICON_MAINTENANCE, "fanart": FANART})
-            xbmcplugin.addDirectoryItem(
-                plugin.handle,
-                _playlist_report_missing_url(kind, arg, heading), li, False)
-
     art_entries = ([entry for _, entry in tracks]
                    if _musicmp3_enabled() else
                    [entry for song, entry in tracks if song])
@@ -4845,7 +5167,7 @@ def _render_playlist(kind, arg, heading, entries=None, building=False):
     playlist_portraits = (_artist_thumbs(
         list(dict.fromkeys(entry.get("artist", "") for entry in art_entries
                            if entry.get("artist"))),
-        queue_missing=not _artwork_backgrounds_enabled())
+        queue_missing=False)
         if availability_complete else {})
 
     for position, (song, entry) in enumerate(tracks, 1):
@@ -4933,17 +5255,8 @@ def _render_playlist(kind, arg, heading, entries=None, building=False):
     # work on provider entries until their local-library availability is known,
     # and never request artwork for unavailable tracks.
     if availability_complete:
-        playable_entries = [entry for song, entry in tracks if song]
-        artwork_entries = (art_entries if _musicmp3_enabled()
-                           else playable_entries)
-        artwork_artists = (
-            [entry.get("artist", "") for entry in artwork_entries]
-            + [song.get("artist", "") for song, _ in tracks if song])
-        _playlist_stream_metadata(
-            [entry for song, entry in tracks if not song], cache,
-            _current_plugin_path())
-        _playlist_covers(artwork_entries, cache, _current_plugin_path(), folder)
-        _playlist_backgrounds(artwork_artists, _current_plugin_path(), folder)
+        _start_playlist_artwork(entries, tracks, listing_path, folder,
+                                artist=str(arg) if kind in ("radio", "artist_top") else "")
 
     key = _playlist_refresh_key(folder) if folder else ""
     refreshed = key and window.getProperty(key)
@@ -4957,7 +5270,7 @@ def _render_playlist(kind, arg, heading, entries=None, building=False):
                + "&arg=" + quote(str(arg), safe="")
                + "&label=" + quote(heading, safe=""))
         _schedule_playlist_action(url, "RotationPlaylistScan")
-    _show_playlist_progress(_current_plugin_path(), folder)
+    _show_playlist_progress(listing_path, folder)
 
 
 @plugin.route("/playlists")
@@ -5181,7 +5494,7 @@ def user_playlist_cover_action():
             fake.pop("cover_path", None)
             source = _user_playlist_cover(fake, regenerate=True)
             _apply_custom_cover(store, row, source)
-        xbmc.executebuiltin("Container.Update(%s,replace)" %
+        xbmc.executebuiltin("Container.Update(%s)" %
                             plugin.url_for(user_playlists_root))
     except Exception as exc:
         xbmc.log("[rotation] Playlist cover edit failed: %s" % exc, xbmc.LOGWARNING)
@@ -5198,6 +5511,14 @@ def user_playlists_root():
                    "fanart": FANART})
     xbmcplugin.addDirectoryItem(
         plugin.handle, plugin.url_for(user_playlist_create), create, False)
+    imported = xbmcgui.ListItem("Import Playlist")
+    imported.setLabel2("Choose a TXT or CSV file · Format help available")
+    imported.setArt({"thumb": ICON_PLAYLISTS, "icon": ICON_PLAYLISTS,
+                     "fanart": FANART})
+    imported.addContextMenuItems([("Import Format Help", "RunPlugin(%s)" %
+                                  plugin.url_for(user_playlist_import_help))])
+    xbmcplugin.addDirectoryItem(
+        plugin.handle, plugin.url_for(user_playlist_import), imported, False)
     for row in store.list():
         playlist_id = str(row["id"])
         url = plugin.url_for(user_playlist_open, playlist_id)
@@ -5215,6 +5536,64 @@ def user_playlists_root():
     xbmcplugin.setPluginCategory(plugin.handle, "My Playlists")
     _set_view("albums")
     xbmcplugin.endOfDirectory(plugin.handle, cacheToDisc=False)
+
+
+@plugin.route("/playlists/mine/import/help")
+def user_playlist_import_help():
+    xbmcgui.Dialog().textviewer("Import Playlist — Format Help", PLAYLIST_IMPORT_HELP)
+    _end_action()
+
+
+@plugin.route("/playlists/mine/import")
+def user_playlist_import():
+    dialog = xbmcgui.Dialog()
+    action = dialog.select("Import Playlist", ["Choose File", "Format Help"])
+    if action == 1:
+        dialog.textviewer("Import Playlist — Format Help", PLAYLIST_IMPORT_HELP)
+    if action < 0:
+        _end_action(); return
+    selected = dialog.browse(1, "Choose Playlist File", "files",
+                             ".txt|.csv", False, False, "")
+    if not selected:
+        _end_action(); return
+    try:
+        handle = xbmcvfs.File(selected)
+        try:
+            if handle.size() > 5 * 1024 * 1024:
+                raise ValueError("Playlist files must be smaller than 5 MB.")
+            raw = handle.readBytes()
+        finally:
+            handle.close()
+        filename = unquote(selected.replace("\\", "/").rsplit("/", 1)[-1])
+        suggested, extension = os.path.splitext(filename)
+        tracks, problems = parse_playlist(raw, extension)
+        if not tracks:
+            dialog.textviewer("No Songs to Import", "\n".join(problems) or
+                              "This file contains no songs.")
+            _end_action(); return
+        count = len(tracks)
+        if not dialog.yesno("Import Playlist", "%d song%s to import" %
+                            (count, "" if count == 1 else "s"),
+                            nolabel="Cancel", yeslabel="Import"):
+            _end_action(); return
+        name = dialog.input("Imported Playlist Name", defaultt=suggested or "Imported Playlist",
+                            type=xbmcgui.INPUT_ALPHANUM).strip()
+        if not name:
+            _end_action(); return
+        store = _user_playlists()
+        row = store.create(name)
+        try:
+            row["tracks"] = tracks
+            store.save(row)
+        except Exception:
+            store.delete(row["id"])
+            raise
+        dialog.notification(plugin.name, "Imported %d songs into %s" % (len(tracks), name),
+                            xbmcgui.NOTIFICATION_INFO, 3500)
+        _refresh_user_playlists_root()
+    except Exception as exc:
+        _notify_error("Could not import playlist: %s" % exc)
+    _end_action()
 
 
 @plugin.route("/playlists/mine/create")
@@ -5246,13 +5625,8 @@ def user_playlist_open(playlist_id):
         return
     entries = row.get("tracks", [])
     if not entries:
-        _add_playlist_summary([])
-        edit_url = (plugin.url_for(user_playlist_manage)
-                    + "?playlist_id=" + quote(playlist_id, safe=""))
-        edit = xbmcgui.ListItem("Edit Playlist")
-        edit.setLabel2("Rename or delete this empty playlist")
-        edit.setArt({"icon": ICON_PLAYLISTS, "fanart": FANART})
-        xbmcplugin.addDirectoryItem(plugin.handle, edit_url, edit, False)
+        _add_playlist_summary([], artwork=_playlist_summary_art("user", playlist_id, []),
+                              context_menu=_playlist_management_context(playlist_id))
         empty = xbmcgui.ListItem("This playlist is empty")
         empty.setLabel2("Use Add to My Playlist from a song, album or artist")
         empty.setArt({"icon": ICON_SONGS, "fanart": FANART})
@@ -5296,6 +5670,8 @@ def user_playlist_add():
     default_name = ""
     if scope == "snapshot":
         default_name = _snapshot_default_name(store, kind, arg, label)
+    elif scope == "album":
+        default_name = _album_playlist_default_name(store, entries, label, artist)
     try:
         target = _choose_user_playlist(store, default_name)
     except (IOError, OSError):
@@ -5564,6 +5940,8 @@ def library_radio_decade():
 
 @plugin.route("/playlists/library_radio/open")
 def library_radio_open():
+    if not _navigation_request_is_current():
+        return
     target = unquote(plugin.args.get("target", [""])[0])
     if target:
         xbmc.executebuiltin("Container.Update(%s)" % target)
@@ -5580,7 +5958,9 @@ def library_radio_mix():
         xbmcplugin.endOfDirectory(plugin.handle, succeeded=False)
         return
     context = _library_radio_context(mode, value, heading)
-    _add_library_radio_summary(tracks)
+    summary_art = (_playlist_artist_summary_art(value) if mode == "artist"
+                   else _art("", FANART, ICON_RADIO))
+    _add_library_radio_summary(tracks, artwork=summary_art, context_menu=context)
     for position, song in enumerate(tracks, 1):
         li = _playlist_listitem(song, position)
         li.addContextMenuItems(context, replaceItems=False)
@@ -5642,6 +6022,7 @@ def playlists_genres():
         return
 
     for genre in genres:
+        _remember_playlist_summary_art("genre", genre["id"], genre.get("picture", ""))
         li = xbmcgui.ListItem(genre["name"])
         li.setArt(_art(genre.get("picture", ""), FANART, ICON_GENRES))
         li.addContextMenuItems(
@@ -5676,6 +6057,7 @@ def _show_deezer_playlist_choices(playlists):
     """Keep popular and genre playlists on the same playback and scan path."""
     api = _favorites()
     for entry in playlists:
+        _remember_playlist_summary_art("editorial", entry["id"], entry.get("cover", ""))
         url = (plugin.url_for(playlists_editorial_tracks, entry["id"])
                + "?title=" + quote(entry["title"], safe=""))
         li = xbmcgui.ListItem(entry["title"])
@@ -5832,6 +6214,8 @@ def _render_deezer_album_choices(albums, category):
             status, availability = "Not in Library", "missing"
         artist = album.get("artist", "") or "Various Artists"
         aid = str(album["id"])
+        _remember_playlist_summary_art(
+            "deezer_album", aid, local.get("thumb") or album.get("cover", ""), artist)
         url = plugin.url_for(playlists_deezer_album, aid)
         display_title = ("[x] %s" % album["title"]
                          if availability == "missing" and show_marker
@@ -5867,15 +6251,18 @@ def albums_search():
             xbmcplugin.endOfDirectory(plugin.handle, succeeded=False)
         return
     if plugin.handle >= 0:
-        xbmcplugin.endOfDirectory(plugin.handle)
+        xbmcplugin.endOfDirectory(plugin.handle, succeeded=False, cacheToDisc=False)
     opener = (plugin.url_for(albums_search_open)
               + "?query=" + quote(query, safe=""))
+    opener += _navigation_origin_query()
     _schedule_playlist_action(opener, "RotationAlbumSearchOpen")
 
 
 @plugin.route("/albums/search/open")
 def albums_search_open():
     """Open results after Kodi has dismissed the non-folder search action."""
+    if not _navigation_request_is_current():
+        return
     query = unquote(plugin.args.get("query", [""])[0]).strip()
     if query:
         target = (plugin.url_for(albums_search_results)
@@ -6111,13 +6498,16 @@ def playlists_radio_favorite():
 def _open_radio_after_selection(artist):
     """Open a station from an action without adding the picker to Back history."""
     if plugin.handle >= 0:
-        xbmcplugin.endOfDirectory(plugin.handle)
+        xbmcplugin.endOfDirectory(plugin.handle, succeeded=False, cacheToDisc=False)
     url = plugin.url_for(playlists_radio_open) + "?artist=" + quote(artist, safe="")
+    url += _navigation_origin_query()
     _schedule_playlist_action(url, "RotationRadioOpen")
 
 
 @plugin.route("/playlists/radio/open")
 def playlists_radio_open():
+    if not _navigation_request_is_current():
+        return
     artist = unquote(plugin.args.get("artist", [""])[0])
     if artist:
         xbmc.executebuiltin("Container.Update(%s)" % _playlist_folder_url("radio", artist))
@@ -6356,8 +6746,15 @@ def playlists_play():
                      (entry.get("artist"), entry.get("title"), exc),
                      xbmc.LOGWARNING)
             if str(exc).startswith("Streaming source unavailable"):
-                action_window.setProperty("Rotation.MusicMP3UnavailableUntil",
-                                          str(time.time() + 60))
+                _musicmp3_open_cooldown(exc)
+                local_rows = [row for row in queued if row[0]]
+                for local_song, local_entry, local_position in local_rows:
+                    buffered.append((local_song["file"],
+                                     _playlist_listitem(local_song, local_position)))
+                queued = [row for row in queued if not row[0]]
+                _musicmp3_outage_notice(bool(local_rows) or any(
+                    not url.startswith(("http://", "https://")) for url, _ in buffered),
+                    bool(buffered))
                 # This row was not proven unavailable; the provider failed.
                 # Preserve it and the untouched queue for an automatic retry.
                 queued.insert(0, (song, entry, position))
@@ -6366,9 +6763,10 @@ def playlists_play():
     if not buffered:
         progress.close()
         action_window.setProperty("Rotation.PlayActionUntil", str(time.time() + 5))
-        xbmcgui.Dialog().notification(
-            plugin.name, "No playable tracks were found.",
-            xbmcgui.NOTIFICATION_WARNING, 4500)
+        if not _musicmp3_cooldown_remaining():
+            xbmcgui.Dialog().notification(
+                plugin.name, "No playable tracks were found.",
+                xbmcgui.NOTIFICATION_WARNING, 4500)
         return
 
     remaining = [{"song": song, "entry": entry, "position": position}
@@ -6387,6 +6785,9 @@ def playlists_play():
     progress.close()
     action_window.setProperty("Rotation.PlayActionUntil", str(time.time() + 5))
     _notify_playlist_count(len(tracks), len(entries))
+    folder = _playlist_folder_url(kind, arg)
+    _start_playlist_artwork(entries, tracks, folder, folder,
+                            artist=str(arg) if kind in ("radio", "artist_top") else "")
 
 
 @plugin.route("/playlists/report_missing")
@@ -6395,7 +6796,7 @@ def playlists_report_missing():
     kind = unquote(plugin.args.get("kind", [""])[0])
     arg = unquote(plugin.args.get("arg", [""])[0])
     label = unquote(plugin.args.get("label", ["Artist Tracks"])[0])
-    if kind not in ("artist_top", "deezer_album"):
+    if kind not in ("artist_top", "deezer_album", "user"):
         return
     if not _unavailable_report_enabled():
         _notify_error("Unavailable track reporting is turned off.")
@@ -6403,10 +6804,10 @@ def playlists_report_missing():
     entries = _playlist_entries(kind, arg)
     index = _library()
     index.build()
-    candidates = list(_playlist_tracks(entries, index))
+    candidates = list(_playlist_tracks(entries, index, allow_christmas=kind == "user"))
     missing_count = sum(1 for song, _ in candidates if not song)
     _check_playlist_tracks(
-        entries, index, label, record_unavailable=True)
+        entries, index, label, record_unavailable=True, allow_christmas=kind == "user")
     if missing_count:
         xbmcgui.Dialog().notification(
             plugin.name,
@@ -6440,7 +6841,6 @@ def playlists_scan():
                            "%d/%d/%d" % (checked, found, total))
         if checked % 10 == 0 and checked < total:
             _save_availability(cache)
-            _safe_background_refresh(folder, "playlist availability progress")
     try:
         allow_christmas = (kind == "user" or
                            (kind == "tag" and _is_christmas_selection(arg)))
@@ -6450,24 +6850,26 @@ def playlists_scan():
             record_unavailable=kind not in ("artist_top", "deezer_album"))
     finally:
         if folder:
-            window.setProperty(_playlist_scan_done_key(folder), "1")
+            completed_counts = window.getProperty(_playlist_scan_key(folder))
+            window.setProperty(_playlist_scan_done_key(folder), completed_counts or "1")
             window.clearProperty(_playlist_scan_key(folder))
     _notify_playlist_count(len(tracks), len(entries))
+    # Availability and artwork publish a single finished directory together.
+    # Numeric scan totals remain available to the one progress owner.
+    artwork_started = _start_playlist_artwork(
+        entries, tracks, folder, folder, force_refresh=True,
+        artist=str(arg) if kind in ("radio", "artist_top") else "")
     if folder:
         xbmc.executebuiltin("CancelAlarm(RotationPlaylistPartial,silent)")
-        # Availability completion changes actual playlist data and its summary,
-        # so it must not wait behind cosmetic artwork idle safeguards.
-        refresh_url = (plugin.url_for(playlists_refresh)
-                       + "?folder=" + quote(folder, safe=""))
-        _schedule_playlist_action(refresh_url, "RotationPlaylistComplete")
-
+        if not artwork_started:
+            _queue_background_refresh(folder, "playlist availability complete", service_only=True)
 
 @plugin.route("/playlists/refresh")
 def playlists_refresh():
     """Commit a completed scan only while its original directory is visible."""
     folder = unquote(plugin.args.get("folder", [""])[0])
     if folder and _same_plugin_location(
-            xbmc.getInfoLabel("Container.FolderPath"), folder):
+            _visible_playlist_location(), folder):
         xbmcgui.Window(10000).setProperty(_playlist_refresh_key(folder), "1")
         xbmc.log("[rotation] Displaying completed playlist availability scan",
                  xbmc.LOGINFO)
@@ -6772,6 +7174,67 @@ def _find_musicmp3_track(api, entry):
         artist, title, _musicmp3_album_tracks(api, entry))
 
 
+def _musicmp3_cooldown_remaining():
+    try:
+        until = float(xbmcgui.Window(10000).getProperty("Rotation.MusicMP3UnavailableUntil") or 0)
+        return max(0, int(math.ceil(until - time.time())))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _musicmp3_open_cooldown(exc):
+    """Only real failed requests open a circuit; blocked attempts never extend it."""
+    if "(cooldown)" in str(exc) or _musicmp3_cooldown_remaining():
+        return False
+    xbmcgui.Window(10000).setProperty("Rotation.MusicMP3UnavailableUntil", str(time.time() + 60))
+    ProviderHealth("MusicMP3.ru").failure("unreachable", exc)
+    return True
+
+
+def _musicmp3_outage_notice(library_remaining=False, playable_remaining=False):
+    window = xbmcgui.Window(10000)
+    until = window.getProperty("Rotation.MusicMP3UnavailableUntil")
+    key = "Rotation.MusicMP3NoticeUntil"
+    if until and window.getProperty(key) == until:
+        return
+    if until: window.setProperty(key, until)
+    if library_remaining:
+        message = "Streaming temporarily unavailable. Continuing with library songs."
+    elif playable_remaining:
+        message = "Streaming temporarily unavailable. Continuing with buffered songs."
+    else:
+        message = "Streaming temporarily unavailable. No library songs remain. Try again shortly."
+    xbmcgui.Dialog().notification("Streaming source unavailable", message,
+                                  xbmcgui.NOTIFICATION_WARNING, 5000)
+
+
+def _verified_musicmp3_track(entry):
+    """Retry a genuine network failure once, never retry a missing track."""
+    if _musicmp3_cooldown_remaining():
+        raise RuntimeError("Streaming source unavailable (cooldown)")
+    for attempt in range(2):
+        api = _make_musicmp3(timeout_override=2 if attempt == 0 else 1)
+        match = _find_musicmp3_track(api, entry)
+        if not match:
+            if not api.last_error:
+                raise ValueError("No matching stream was found")
+        else:
+            url = api.play_url(match["track_id"], match["rel"],
+                               referer_url=match.get("album_url") or None)
+            if api.stream_available(url):
+                window = xbmcgui.Window(10000)
+                window.clearProperty("Rotation.MusicMP3UnavailableUntil")
+                window.clearProperty("Rotation.MusicMP3NoticeUntil")
+                ProviderHealth("MusicMP3.ru").success()
+                return api, match, url
+            if not api.last_error:
+                raise ValueError("The stream server was unavailable")
+        if attempt == 1:
+            raise RuntimeError("Streaming source unavailable: %s" % api.last_error)
+        xbmc.log("[rotation] MusicMP3.ru request failed; retrying once: %s" % api.last_error,
+                 xbmc.LOGWARNING)
+
+
 def _resolve_musicmp3_stream(entry, session=""):
     """Return one verified direct stream URL without touching Kodi's player."""
     artist = entry.get("artist", "")
@@ -6779,24 +7242,7 @@ def _resolve_musicmp3_stream(entry, session=""):
     if not artist or not title:
         raise ValueError("Missing artist or title")
     window = xbmcgui.Window(10000)
-    try:
-        if time.time() < float(window.getProperty(
-                "Rotation.MusicMP3UnavailableUntil") or 0):
-            raise RuntimeError("Streaming source unavailable (cooldown)")
-    except ValueError:
-        pass
-    api = _make_musicmp3(timeout_override=2)
-    match = _find_musicmp3_track(api, entry)
-    if not match:
-        if api.last_error:
-            raise RuntimeError("Streaming source unavailable: %s" % api.last_error)
-        raise ValueError("No matching stream was found")
-    url = api.play_url(match["track_id"], match["rel"],
-                       referer_url=match.get("album_url") or None)
-    if not api.stream_available(url):
-        if api.last_error:
-            raise RuntimeError("Streaming source unavailable: %s" % api.last_error)
-        raise ValueError("The stream server was unavailable")
+    api, match, url = _verified_musicmp3_track(entry)
     if session:
         session_key = "Rotation.StreamSession.%s" % session
         try:
@@ -6847,8 +7293,18 @@ def playlists_lookahead():
                          (entry.get("artist"), entry.get("title"), exc),
                          xbmc.LOGWARNING)
                 if str(exc).startswith("Streaming source unavailable"):
-                    window.setProperty("Rotation.MusicMP3UnavailableUntil",
-                                       str(time.time() + 60))
+                    _musicmp3_open_cooldown(exc)
+                    local_rows = [item for item in remaining if item.get("song")]
+                    for local_row in local_rows:
+                        local_song = local_row["song"]
+                        xbmc.PlayList(xbmc.PLAYLIST_MUSIC).add(
+                            local_song["file"], _playlist_listitem(
+                                local_song, local_row.get("position") or 0))
+                    remaining = [item for item in remaining if not item.get("song")]
+                    appended = bool(local_rows)
+                    _musicmp3_outage_notice(bool(local_rows),
+                        xbmc.PlayList(xbmc.PLAYLIST_MUSIC).size() - max(0,
+                            xbmc.PlayList(xbmc.PLAYLIST_MUSIC).getposition()) > 1)
                     # Put the interrupted candidate back. The background
                     # service observes the cooldown and resumes this same
                     # queue after the provider has had time to recover.
@@ -6868,38 +7324,8 @@ def _play_musicmp3_fallback(artist, title, album="", cover="", session=""):
         if not artist or not title:
             raise ValueError("Missing artist or title")
         window = xbmcgui.Window(10000)
-        try:
-            if time.time() < float(window.getProperty(
-                    "Rotation.MusicMP3UnavailableUntil") or 0):
-                raise RuntimeError("Streaming source unavailable (cooldown)")
-        except ValueError:
-            pass
-        # Kodi allows a queued plugin:// resolver only a few seconds. Make one
-        # direct two-second search and one two-second stream preflight, without
-        # the normal session warm-up or retry/backoff cycle.
-        api = _make_musicmp3(timeout_override=2)
-        match = _find_musicmp3_track(api, {
+        api, match, url = _verified_musicmp3_track({
             "artist": artist, "title": title, "album": album})
-        if not match:
-            if api.last_error:
-                raise RuntimeError("Streaming source unavailable: %s" %
-                                   api.last_error)
-            raise ValueError("No matching stream was found")
-        url = ""
-        for attempt in range(1):
-            candidate = api.play_url(
-                match["track_id"], match["rel"],
-                referer_url=match.get("album_url") or None)
-            if api.stream_available(candidate):
-                url = candidate
-                break
-            xbmc.log("[rotation] MusicMP3.ru stream URL failed preflight "
-                     "(attempt %d/1)" % (attempt + 1), xbmc.LOGWARNING)
-        if not url:
-            if api.last_error:
-                raise RuntimeError("Streaming source unavailable: %s" %
-                                   api.last_error)
-            raise ValueError("The stream server was unavailable")
         if session:
             window = xbmcgui.Window(10000)
             session_key = "Rotation.StreamSession.%s" % session
@@ -6918,9 +7344,14 @@ def _play_musicmp3_fallback(artist, title, album="", cover="", session=""):
             window.setProperty(session_key, json.dumps(list(seen)[-200:]))
         track = api.get_track(match["rel"])
         li = xbmcgui.ListItem(track.title or title, path=url)
-        # Playback must not wait on the artwork database while a background
-        # artwork worker is writing to it.
-        li.setArt(_art(cover or track.image or "", FANART))
+        # Use the same cache-only, library-first background lookup as the
+        # playlist row. This never performs a network request, so playback
+        # remains immediate while the player receives the fanart already
+        # visible on the playlist screen.
+        resolved_artist = track.artist or artist
+        li.setArt(_art(cover or track.image or "",
+                       _cached_background(resolved_artist),
+                       clearlogo=_cached_logo(resolved_artist)))
         li.setMimeType("audio/mpeg")
         li.setContentLookup(False)
         _set_music_tag(li, title=track.title or title,
@@ -6936,9 +7367,7 @@ def _play_musicmp3_fallback(artist, title, album="", cover="", session=""):
         source_down = str(exc).startswith("Streaming source unavailable")
         if source_down:
             window = xbmcgui.Window(10000)
-            window.setProperty("Rotation.MusicMP3UnavailableUntil",
-                               str(time.time() + 60))
-            ProviderHealth("MusicMP3.ru").failure("unreachable", exc)
+            _musicmp3_open_cooldown(exc)
         # Kodi 21 can terminate itself when a failed queued plugin:// item is
         # followed immediately by another plugin:// item: the second resolver
         # opens while Kodi's first busy dialog is still closing. Resolve this
@@ -6946,7 +7375,8 @@ def _play_musicmp3_fallback(artist, title, album="", cover="", session=""):
         # current invocation finish cleanly before PAPlayer advances, while
         # retaining the expected skip-to-next-track behaviour.
         li = xbmcgui.ListItem(title, path=UNAVAILABLE_AUDIO)
-        li.setArt(_art(cover, FANART))
+        li.setArt(_art(cover, _cached_background(artist),
+                       clearlogo=_cached_logo(artist)))
         li.setMimeType("audio/mpeg")
         li.setContentLookup(False)
         _set_music_tag(li, title=title, artist=artist, album=album, duration=1)
@@ -6969,9 +7399,26 @@ def _play_musicmp3_fallback(artist, title, album="", cover="", session=""):
             except Exception as remove_exc:
                 xbmc.log("[rotation] Could not remove offline streaming rows: %s"
                          % remove_exc, xbmc.LOGWARNING)
-            xbmcgui.Dialog().notification(
-                "Streaming source unavailable", "Continuing with library songs",
-                xbmcgui.NOTIFICATION_WARNING, 5000)
+            local_remaining = False
+            buffered_remaining = False
+            try:
+                current = max(-1, playlist.getposition())
+                for position in range(current + 1, playlist.size()):
+                    path = playlist[position].getPath()
+                    if not path or path == UNAVAILABLE_AUDIO: continue
+                    if path.startswith(("http://", "https://")):
+                        buffered_remaining = True
+                    elif not path.startswith("plugin://"):
+                        local_remaining = True
+            except Exception:
+                pass
+            if "(cooldown)" in str(exc):
+                xbmcgui.Dialog().notification(
+                    "Streaming temporarily unavailable",
+                    "Streaming retry available in %d seconds" % _musicmp3_cooldown_remaining(),
+                    xbmcgui.NOTIFICATION_INFO, 3000)
+            else:
+                _musicmp3_outage_notice(local_remaining, buffered_remaining)
         elif str(exc) != "Duplicate stream suppressed":
             xbmcgui.Dialog().notification(
                 "Track unavailable", "Skipping to the next song",

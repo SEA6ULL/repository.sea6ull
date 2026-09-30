@@ -77,6 +77,7 @@ BULK_MISS = "bulk-miss"
 P_DEEZER   = "deezer"
 P_AUDIODB  = "audiodb"
 P_FANARTTV = "fanarttv"
+P_FANARTTV_LOGO = "fanarttv-logo"
 
 # Sources recorded on an artist row, for stats() and for reading the log.
 SRC_DEEZER   = "artist-deezer"
@@ -131,6 +132,7 @@ class ArtworkCache(BaseModel):
     key        = CharField(unique=True)
     thumb      = TextField(default="")
     fanart     = TextField(default="")
+    logo       = TextField(default="")
     source     = TextField(default="")
     # Comma-separated provider names already asked for this row. See the
     # P_* constants; the empty string means "nothing, or written by a
@@ -248,14 +250,14 @@ class ArtworkProvider:
                 db.init(os.path.join(cache_dir, "rotation.db"))
             db.connect(reuse_if_open=True)
             db.create_tables([ArtworkCache], safe=True)
-            self._add_tried_column()
+            self._add_cache_columns()
             return True
         except Exception as exc:
             _log("could not initialise cache database: %s" % exc,
                  xbmc.LOGWARNING)
             return False
 
-    def _add_tried_column(self):
+    def _add_cache_columns(self):
         """
         Add the "tried" column to a cache written by an earlier version.
 
@@ -267,15 +269,18 @@ class ArtworkProvider:
         try:
             columns = {c.name for c in db.get_columns(
                 ArtworkCache._meta.table_name)}
-            if "tried" in columns:
-                return
-            db.execute_sql(
-                "ALTER TABLE %s ADD COLUMN tried TEXT NOT NULL DEFAULT ''"
-                % ArtworkCache._meta.table_name
-            )
-            _log("cache: added 'tried' column to existing table",
-                 xbmc.LOGINFO)
-            self._drop_guessed_portraits()
+            if "tried" not in columns:
+                db.execute_sql(
+                    "ALTER TABLE %s ADD COLUMN tried TEXT NOT NULL DEFAULT ''"
+                    % ArtworkCache._meta.table_name)
+                _log("cache: added 'tried' column to existing table", xbmc.LOGINFO)
+                self._drop_guessed_portraits()
+            if "logo" not in columns:
+                db.execute_sql(
+                    "ALTER TABLE %s ADD COLUMN logo TEXT NOT NULL DEFAULT ''"
+                    % ArtworkCache._meta.table_name)
+                _log("cache: added clearlogo support; existing artists will be checked",
+                     xbmc.LOGINFO)
         except Exception as exc:
             _log("could not add 'tried' column: %s" % exc, xbmc.LOGWARNING)
 
@@ -347,18 +352,19 @@ class ArtworkProvider:
             return None
 
         age = time.time() - (row.fetched_at or 0)
-        ttl = HIT_TTL if (row.thumb or row.fanart) else MISS_TTL
+        ttl = HIT_TTL if (row.thumb or row.fanart or row.logo) else MISS_TTL
         if age > ttl:
             return None
 
         return {"thumb": row.thumb, "fanart": row.fanart,
+                "logo": getattr(row, "logo", "") or "",
                 "source": row.source,
                 "tried": getattr(row, "tried", "") or ""}
 
-    def _store(self, key, thumb, fanart, source, tried=None):
+    def _store(self, key, thumb, fanart, source, tried=None, logo=""):
         try:
             ArtworkCache.replace(
-                key=key, thumb=thumb or "", fanart=fanart or "",
+                key=key, thumb=thumb or "", fanart=fanart or "", logo=logo or "",
                 source=source or "", tried=",".join(sorted(tried or ())),
                 fetched_at=time.time()
             ).execute()
@@ -588,7 +594,7 @@ class ArtworkProvider:
         Returns FAILED when the service did not answer, otherwise a dict
         with "thumb" and "background", either of which may be empty.
         """
-        empty = {"thumb": "", "background": ""}
+        empty = {"thumb": "", "background": "", "logo": ""}
         if not self.audiodb_key or not (mbid or name):
             return empty
 
@@ -635,7 +641,7 @@ class ArtworkProvider:
         fanart.tv keys everything on MusicBrainz IDs, which is why the MBID
         lookup is a prerequisite rather than an optimisation.
         """
-        empty = {"thumb": "", "background": ""}
+        empty = {"thumb": "", "background": "", "logo": ""}
 
         if not self.key or not artist_mbid:
             return empty
@@ -669,6 +675,8 @@ class ArtworkProvider:
         return {
             "thumb":      thumb,
             "background": _best(data.get("artistbackground")),
+            "logo":       _best(data.get("hdmusiclogo")) or
+                          _best(data.get("musiclogo")),
         }
 
     # ----------------------------------------------------------------- #
@@ -888,6 +896,12 @@ class ArtworkProvider:
         tried = set((cached.get("tried") or "").split(","))
         return all(name in tried for name in self._background_providers())
 
+    def _logo_settled(self, cached):
+        if cached.get("logo") or not self.key:
+            return True
+        tried = set((cached.get("tried") or "").split(","))
+        return P_FANARTTV_LOGO in tried
+
     def artist_art(self, artist):
         """
         Resolve an artist's portrait and background, cached per artist.
@@ -910,7 +924,7 @@ class ArtworkProvider:
         Transient failures are never cached - a service that did not answer
         tells us nothing about whether the artist has a picture.
         """
-        blank = {"thumb": "", "fanart": ""}
+        blank = {"thumb": "", "fanart": "", "clearlogo": ""}
         if not artist:
             return blank
 
@@ -920,16 +934,18 @@ class ArtworkProvider:
         if cached is not None:
             thumb      = cached.get("thumb", "")
             background = cached.get("fanart", "")
+            logo       = cached.get("logo", "")
             source     = cached.get("source", "")
             tried      = set(t for t in (cached.get("tried") or "").split(",") if t)
             if (self._portrait_settled(cached)
-                    and self._background_settled(cached)):
-                return {"thumb": thumb, "fanart": background}
+                    and self._background_settled(cached)
+                    and self._logo_settled(cached)):
+                return {"thumb": thumb, "fanart": background, "clearlogo": logo}
         else:
-            thumb, background, source, tried = "", "", "", set()
+            thumb, background, logo, source, tried = "", "", "", "", set()
 
         def _result():
-            return {"thumb": thumb, "fanart": background}
+            return {"thumb": thumb, "fanart": background, "clearlogo": logo}
 
         # 1. Deezer.
         if not thumb and P_DEEZER not in tried:
@@ -946,10 +962,13 @@ class ArtworkProvider:
         # background is still wanted, or when nothing has a portrait yet.
         need_portrait   = not thumb
         need_background = bool(self._background_providers()) and not background
+        need_logo       = bool(self.key) and not self._logo_settled(
+            {"logo": logo, "tried": ",".join(tried)})
         mbid_useful     = ((self.audiodb_key and P_AUDIODB not in tried)
-                           or (self.key and P_FANARTTV not in tried))
+                           or (self.key and (P_FANARTTV not in tried or
+                                             P_FANARTTV_LOGO not in tried)))
 
-        if (need_portrait or need_background) and mbid_useful:
+        if (need_portrait or need_background or need_logo) and mbid_useful:
             mbid = self._mb_artist(artist)
 
             if mbid is FAILED:
@@ -960,6 +979,12 @@ class ArtworkProvider:
             if not mbid:
                 _log("no MusicBrainz match for artist %r" % artist,
                      xbmc.LOGINFO)
+                # fanart.tv cannot be queried without an MBID. Record that
+                # this route was exhausted so every directory refresh does
+                # not repeat the same throttled MusicBrainz lookup.
+                if self.key:
+                    tried.add(P_FANARTTV)
+                    tried.add(P_FANARTTV_LOGO)
 
             if self.audiodb_key and P_AUDIODB not in tried:
                 assets = self._audiodb_artist(mbid=mbid) if mbid else None
@@ -980,16 +1005,19 @@ class ArtworkProvider:
                     thumb, source = assets["thumb"], SRC_AUDIODB
                 background = background or assets.get("background", "")
 
-            if self.key and mbid and P_FANARTTV not in tried:
+            if self.key and mbid and (P_FANARTTV not in tried or
+                                      P_FANARTTV_LOGO not in tried):
                 assets = self._fanarttv(mbid)
                 if assets is FAILED:
                     _log("fanart.tv unavailable for %r - not caching a miss"
                          % artist, xbmc.LOGWARNING)
                     return _result()
                 tried.add(P_FANARTTV)
+                tried.add(P_FANARTTV_LOGO)
                 if assets.get("thumb"):
                     thumb, source = assets["thumb"], SRC_FANARTTV
                 background = assets.get("background", "") or background
+                logo = assets.get("logo", "") or logo
 
         # A name-only TheAudioDB pass, for artists MusicBrainz could not
         # place at all.
@@ -1004,9 +1032,9 @@ class ArtworkProvider:
                 thumb, source = assets["thumb"], SRC_AUDIODB
             background = background or assets.get("background", "")
 
-        self._store(key, thumb, background, source or SRC_NONE, tried)
-        _log("artist art for %r -> thumb=%s background=%s via %s (asked: %s)"
-             % (artist, thumb or "NONE", background or "NONE",
+        self._store(key, thumb, background, source or SRC_NONE, tried, logo=logo)
+        _log("artist art for %r -> thumb=%s background=%s logo=%s via %s (asked: %s)"
+             % (artist, thumb or "NONE", background or "NONE", logo or "NONE",
                 source or "NONE", ",".join(sorted(tried)) or "nothing"),
              xbmc.LOGINFO)
         return _result()
@@ -1042,6 +1070,15 @@ class ArtworkProvider:
         if cached is None or not self._background_settled(cached):
             return None
         return cached.get("fanart", "")
+
+    def artist_logo_cached(self, artist):
+        """Cached clearlogo, or None when fanart.tv has not been checked."""
+        if not artist or not self.key:
+            return ""
+        cached = self._cached(self._artist_key(artist))
+        if cached is None or not self._logo_settled(cached):
+            return None
+        return cached.get("logo", "")
 
     def artist_background(self, artist):
         """
@@ -1097,7 +1134,7 @@ class ArtworkProvider:
             # names or the bulk marker.
             if row.source in ARTIST_SOURCES:
                 artists += 1
-                if row.thumb or row.fanart:
+                if row.thumb or row.fanart or getattr(row, "logo", ""):
                     artist_hits += 1
             elif row.thumb:
                 covers += 1
