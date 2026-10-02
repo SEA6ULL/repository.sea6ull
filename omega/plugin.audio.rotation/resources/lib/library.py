@@ -263,58 +263,170 @@ def library_artists():
     return result.get("artists", []) or []
 
 
-# Artist fanart deliberately remains separate from LibraryIndex's song cache.
-# Kodi already owns this metadata and can return a small album-artist list in a
-# single JSON-RPC call; copying it into Rotation's persistent song index would
-# create another cache that could become stale when artwork changes.
+# Artist/album artwork deliberately remains separate from LibraryIndex's song
+# cache. Kodi already owns this metadata and returns it in one JSON-RPC call
+# per table; copying it into Rotation's persistent song index would create
+# another cache that could become stale when artwork changes.
+#
+# Both tables are read in full and held for LIBRARY_ART_TTL seconds. That is
+# one in-process call per table every few minutes, against one call per row
+# for a filtered lookup - which on a 40-tile grid is the slower option.
+LIBRARY_ART_TTL = 300
+_EMPTY_ARTIST = {"thumb": "", "fanart": "", "clearlogo": "", "mbid": ""}
+_EMPTY_ALBUM = {"thumb": "", "fanart": "", "mbid": "", "artist_mbid": ""}
 _ARTIST_ART = {"checked": 0.0, "items": {}}
+_ALBUM_ART = {"checked": 0.0, "exact": {}, "by_title": {}}
+
+
+def _first_mbid(value):
+    """Kodi returns MusicBrainz IDs as a list on v12+ and a string before."""
+    if isinstance(value, (list, tuple)):
+        values = [v for v in value if v]
+        # A multi-artist credit has several IDs; none of them is "the" artist.
+        return values[0] if len(values) == 1 else ""
+    return value or ""
+
+
+def _rpc_with_fallbacks(method, base, property_sets):
+    """Try progressively smaller property sets for older JSON-RPC schemas."""
+    for properties in property_sets:
+        params = dict(base, properties=properties)
+        result = rpc(method, params)
+        if result is not None:
+            return result
+    return None
+
+
+def invalidate_library_art():
+    """Force the next artwork read to re-query Kodi (e.g. after a scan)."""
+    _ARTIST_ART["checked"] = 0.0
+    _ALBUM_ART["checked"] = 0.0
 
 
 def library_artist_art(artist):
-    """Return Kodi's thumbnail and fanart for an exact library artist.
+    """Return Kodi's thumbnail, fanart, clearlogo and MBID for an artist.
 
-    Kodi paths are returned unchanged.  Keeping both fields together makes it
-    possible for add-on rows such as Favorite Radio to prefer the user's
-    chosen library artwork before consulting any external artwork provider.
+    Every library artist is considered, not only album artists: a featured
+    or compilation-only artist that Kodi has scraped art for must not fall
+    through to an online lookup just because they never headed an album.
+    Matching is on the full normalised credit - a credit such as "Lana Del
+    Rey, Father John Misty" must not silently inherit Lana Del Rey's solo
+    fanart. Kodi paths are returned unchanged.
     """
     key = norm_artist(artist)
     if not key:
-        return {"thumb": "", "fanart": "", "clearlogo": ""}
+        return dict(_EMPTY_ARTIST)
 
     now = time.time()
-    if now - _ARTIST_ART["checked"] >= 300:
-        result = rpc("AudioLibrary.GetArtists", {
-            "albumartistsonly": True,
-            "properties": ["thumbnail", "fanart", "art"],
-            "limits": {"start": 0, "end": 100000},
-        })
-        # Older Kodi JSON-RPC schemas do not expose the generic art map for
-        # music artists. Preserve thumb/fanart there instead of allowing one
-        # unsupported optional field to invalidate the complete request.
-        if result is None:
-            result = rpc("AudioLibrary.GetArtists", {
-                "albumartistsonly": True,
-                "properties": ["thumbnail", "fanart"],
-                "limits": {"start": 0, "end": 100000},
-            })
+    if now - _ARTIST_ART["checked"] >= LIBRARY_ART_TTL:
+        base = {"albumartistsonly": False,
+                "limits": {"start": 0, "end": 100000}}
+        result = _rpc_with_fallbacks("AudioLibrary.GetArtists", base, (
+            ["thumbnail", "fanart", "art", "musicbrainzartistid"],
+            ["thumbnail", "fanart", "art"],
+            ["thumbnail", "fanart"],
+        ))
         if result is not None:
             items = {}
             for row in result.get("artists", []) or []:
                 normalized = norm_artist(row.get("artist", ""))
-                if normalized:
-                    items[normalized] = {
-                        "thumb": row.get("thumbnail", "") or "",
-                        "fanart": row.get("fanart", "") or "",
-                        "clearlogo": ((row.get("art") or {}).get("clearlogo") or
-                                      (row.get("art") or {}).get("logo") or ""),
-                    }
+                if not normalized:
+                    continue
+                art = row.get("art") or {}
+                entry = {
+                    "thumb": row.get("thumbnail", "") or art.get("thumb", "") or "",
+                    "fanart": row.get("fanart", "") or art.get("fanart", "") or "",
+                    "clearlogo": art.get("clearlogo") or art.get("logo") or "",
+                    "mbid": _first_mbid(row.get("musicbrainzartistid")),
+                }
+                # Two library rows can normalise alike ("AC/DC", "AC DC");
+                # keep whichever carries more artwork.
+                current = items.get(normalized)
+                if current is None or (sum(map(bool, entry.values())) >
+                                       sum(map(bool, current.values()))):
+                    items[normalized] = entry
             _ARTIST_ART["items"] = items
             xbmc.log("[rotation] Kodi library art: %d artist(s)"
                      % len(items), xbmc.LOGINFO)
         _ARTIST_ART["checked"] = now
 
-    return _ARTIST_ART["items"].get(
-        key, {"thumb": "", "fanart": "", "clearlogo": ""})
+    return dict(_ARTIST_ART["items"].get(key, _EMPTY_ARTIST))
+
+
+def library_artist_mbid(artist):
+    """MusicBrainz artist ID from Kodi's own tags, or ""."""
+    return library_artist_art(artist).get("mbid", "")
+
+
+def _load_library_albums():
+    now = time.time()
+    if now - _ALBUM_ART["checked"] < LIBRARY_ART_TTL:
+        return
+    base = {"limits": {"start": 0, "end": 100000}}
+    result = _rpc_with_fallbacks("AudioLibrary.GetAlbums", base, (
+        ["title", "artist", "thumbnail", "fanart", "art",
+         "musicbrainzreleasegroupid", "musicbrainzalbumartistid"],
+        ["title", "artist", "thumbnail", "fanart", "art"],
+        ["title", "artist", "thumbnail", "fanart"],
+    ))
+    if result is not None:
+        exact, by_title = {}, {}
+        for row in result.get("albums", []) or []:
+            art = row.get("art") or {}
+            entry = {
+                "thumb": row.get("thumbnail", "") or art.get("thumb", "") or "",
+                "fanart": row.get("fanart", "") or "",
+                "mbid": row.get("musicbrainzreleasegroupid", "") or "",
+                "artist_mbid": _first_mbid(row.get("musicbrainzalbumartistid")),
+            }
+            artists = row.get("artist") or []
+            if isinstance(artists, str):
+                artists = [artists]
+            artist_keys = {norm_artist(a) for a in artists if a}
+            if len(artists) > 1:
+                artist_keys.add(norm_artist(", ".join(artists)))
+            for title_key in {norm_title(row.get("title", ""), False),
+                              norm_title(row.get("title", ""), True)}:
+                if not title_key:
+                    continue
+                for artist_key in artist_keys or {""}:
+                    current = exact.get((title_key, artist_key))
+                    if current is None or (entry["thumb"] and not current["thumb"]):
+                        exact[(title_key, artist_key)] = entry
+                bucket = by_title.setdefault(title_key, {"artists": set(),
+                                                         "entry": entry})
+                bucket["artists"].update(artist_keys)
+        _ALBUM_ART["exact"] = exact
+        _ALBUM_ART["by_title"] = by_title
+        xbmc.log("[rotation] Kodi library art: %d album key(s)" % len(exact),
+                 xbmc.LOGINFO)
+    _ALBUM_ART["checked"] = now
+
+
+def library_album_art(artist, album):
+    """Return Kodi's own album thumb/fanart/release-group MBID, or blanks.
+
+    The album artist must match. A title-only match is accepted when Kodi
+    associates that title with exactly one album artist, which covers
+    soundtrack and "Various Artists" credit variations without claiming
+    every self-titled album is locally owned.
+    """
+    if not album:
+        return dict(_EMPTY_ALBUM)
+    _load_library_albums()
+    artist_key = norm_artist(art_artist_name(artist) or artist)
+    full_key = norm_artist(artist)
+    for title_key in (norm_title(album, False), norm_title(album, True)):
+        if not title_key:
+            continue
+        for key in (artist_key, full_key):
+            hit = _ALBUM_ART["exact"].get((title_key, key))
+            if hit:
+                return dict(hit)
+        bucket = _ALBUM_ART["by_title"].get(title_key)
+        if bucket and len(bucket["artists"]) <= 1:
+            return dict(bucket["entry"])
+    return dict(_EMPTY_ALBUM)
 
 
 def library_artist_fanart(artist):
@@ -737,3 +849,13 @@ class LibraryIndex(object):
             xbmc.LOGWARNING,
         )
         return resolved, missing
+
+
+def recording_title(title):
+    text = re.sub(r"[\(\[]\s*(?:feat\.?|ft\.?|featuring)\s+[^)\]]+[\)\]]", "", str(title or ""), flags=re.I)
+    return re.sub(r"\s+(?:feat\.?|ft\.?|featuring)\s+.*$", "", text, flags=re.I).strip()
+
+
+def art_artist_name(artist):
+    # Explicit featured markers and spaced separators, not band-name ampersands.
+    return re.split(r"\s+(?:feat\.?|ft\.?|featuring)\s+|\s+/\s+|\s*;\s*", str(artist or ""), maxsplit=1, flags=re.I)[0].strip(" ([")

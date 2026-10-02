@@ -71,10 +71,12 @@ CSV is useful when an artist or song name contains ` - `. Quote values that cont
 
 ### Importing in Kodi
 
-1. Open **My Music → My Playlists → Import Playlist**.
+1. Open **My Music → Create Playlist → Import Playlist**.
 2. Select **Choose File** and use Kodi’s file browser to select your `.txt` or `.csv` file.
 3. Confirm the song count with **Import**, or choose **Cancel**.
 4. Accept or edit the suggested playlist name.
+
+**My Playlists** shows saved playlists only, making it suitable for skin widgets. Use **My Music → Create Playlist** to create or import a playlist.
 
 Store the file wherever Kodi can access it, including an accessible network share. No dedicated import folder is needed. **Format Help** is also available from the import menu.
 
@@ -100,11 +102,17 @@ Last.fm can also combine listening history from other connected services, includ
 
 Rotation reads this history for personalization; it does not perform the scrobbling itself. A Kodi scrobbling service, or another service connected directly to [Last.fm](https://www.last.fm), records the plays.
 
+## Hide unwanted artists
+
+Choose **Hide Artist** from an artist’s context menu to remove that exact artist name from Rotation’s artist lists and album discovery. Hidden entries are filtered before their artwork is looked up. Similar names stay separate: hiding Ilona does not hide Iliona.
+
+Restore an artist through **Maintenance → Hidden Artists**, using Kodi’s standard text-only selection dialog. Preferences are saved per installation. Hiding does not change your Last.fm profile, delete music, or remove tracks from saved playlists.
+
 ## Built for Kodi libraries
 
 Rotation does not replace Kodi’s music library; it makes that library far more enjoyable to explore. Your existing files, metadata, artwork, playlists, and Kodi playback features remain at the center of the experience.
 
-Rotation never downloads or acquires music. Local-library playback is the default; the optional MusicMP3.ru switch can provide streaming fallbacks.
+Local-library playback is the default. MusicMP3.ru provides optional streaming fallbacks and direct downloads initiated from context menus.
 
 ## Optional services
 
@@ -117,3 +125,43 @@ Optional cross-device synchronization uses a `.rotation` folder in the shared Ko
 Rotation is authored by SEA6ULL / GPT and licensed under GPL-3.0.
 
 Navigation symbols are based on Phosphor Icons and retain their bundled MIT license attribution in `resources/media/icons/LICENSE.phosphor.txt`.
+
+### Appearance
+
+In **Settings → Appearance**, choose **Rotation — Default** or **Simple White** for menu icons. The white pack uses Phosphor Regular symbols on transparent PNGs.
+
+Choose **Fallback Fanart**, **Fallback Artist Image**, or **Fallback Album Image** to select a JPG/JPEG or PNG with Kodi’s standard file browser. Rotation copies the image into its own userdata `custom_artwork` folder; the original file can then be moved or deleted. Copies survive normal add-on updates and thumbnail/cache cleanup. Actual artwork takes priority, and menu backgrounds keep the bundled theme. Each image has a **Restore Default** action. Rotation and Rotation Plus keep separate choices.
+
+### Direct downloads
+
+Use track, album, or playlist-summary context menus to download from MusicMP3.ru. **Download Missing Tracks** skips available library songs. Playlist jobs keep an immutable snapshot, and uncertain recordings are reported instead of substituted. MusicMP3.ru playback/streaming preferences are separate from direct downloads.
+
+In **Settings → Downloads**, choose a writable destination and **Playlist Compilation — Various Artists** (default) or **Original Albums**. Compilation downloads retain each performer while tagging Album as the playlist name and Album Artist as Various Artists. Albums and single songs use original album organization. **Simultaneous Downloads** offers one or two audio transfers, default two; the source stream’s bitrate is retained. More connections caused service errors in device testing, so four is no longer offered.
+
+**Scan Library After Download** defaults off. If enabled, it scans only downloaded album/playlist folders and does not run after cancellation. Choose a folder outside existing music sources to keep downloads outside the Kodi library; a later manual scan can import files inside a source. Kodi’s “show song artists” preference controls whether contributing performers appear in Library Artists.
+
+**Ask About Options Each Download** defaults off: a simple confirmation appears. Enable it for Download / Change Options / Cancel using stock Kodi dialogs. Changes apply only to that job; choosing a destination on first use saves that initial folder.
+
+**Add Downloaded Playlists to My Playlists** defaults on and replaces automatic M3U saving. Completed playlists combine accessible library songs and successful downloads in snapshot order, omitting unavailable tracks. Albums, single tracks, and canceled jobs are not added automatically. A manual **Add to My Playlists** action is available for terminal playlist jobs. Saved file paths allow unscanned downloads to play from My Playlists, and retries update the same saved playlist.
+
+**Export Playlist** is available on playlist summary menus, including My Playlists, charts, featured playlists, radio/library mixes, and Downloads. Choose a folder with Kodi’s browser to save an M3U8 containing accessible file paths in order. The confirmation counts unavailable tracks that will be omitted. Exports contain no music or temporary streaming links and remain fixed snapshots. Playback elsewhere requires access to those same files. Existing export files are protected; repeated exports receive unique filenames.
+
+**Download Notifications** offers Continuous Progress, Milestones (25%, 50%, and 75%), and When Finished (default). While browsing Downloads or its track lists, active work shows continuous progress regardless of that preference. Full-screen players hide progress. Milestones count tracks processed, not bytes, and the final summary reports downloaded/unavailable tracks and cancellation.
+
+**My Music → Downloads** opens album/playlist track lists and offers playback, reports, cancellation, retry, export, and Scan Downloaded Folders through standard Kodi menus. Album attempts for the same album and destination share one row, retain previous-attempt history, and include files saved in earlier attempts. Stage timings in reports, CSV, and Kodi logs distinguish matching/preparation, receiving audio, tagging, and destination writes. No song-by-song directory refreshes or automatic playback are used.
+
+Mutagen is bundled with its GPL license in `resources/lib/vendor/mutagen/COPYING`. Rotation Plus retains its separate full-album Lidarr/Premiumize tools. Rapid-skip lookahead now waits briefly for playback to settle and rejects stale sessions; server availability still depends on the source.
+
+### Download history and cache maintenance
+Downloaded albums use Kodi's standard song listing with consistent album cover, artist fanart and clearlogo across the summary and tracks. Missing artwork resolves in a background batch with one refresh.
+
+Use **Remove from Downloads** to remove a terminal entry and its reports without deleting music or saved playlists. **Maintenance → Clear Finished Download History** removes only fully available completed jobs; active and incomplete jobs stay available for retry. Download history remains until you remove it. Saved playlists are permanent until explicitly deleted.
+
+Disposable provider cache responses and download/export snapshots older than 30 days are pruned at service startup and daily. Abandoned download temporary files older than one day are removed; recovery receipts for retained jobs stay protected. Custom fallback artwork, saved playlists, download artwork and actual music are retained. Provider cache freshness still follows Playlist Cache Hours.
+
+Your Top Artists and For You album recommendations group explicit collaboration credits under the first credited artist and combine play counts. Real group names and full song credits are preserved.
+
+### Milestone notifications and missing artwork retries
+Milestones at 25%, 50% and 75% follow the same progress estimate as the Downloads display, including partial transfers. Progress is monotonic within an attempt. Milestone notices show the percentage first. While Downloads or the full-screen player hides notices, crossed checkpoints stay pending; after leaving, the latest checkpoint displays once. Completion replaces any remaining pending milestones when the job ends.
+
+Missing artist artwork retries on subsequent visits after 15 minutes independently of cached image hits. Existing portraits/fanart/logos are retained. Lookups remain background batches with one deferred redraw. Diagnostic logs include notification mode/crossings/delivery and safe artist identity/provider asset counts, without API keys.

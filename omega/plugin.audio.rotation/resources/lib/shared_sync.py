@@ -97,7 +97,8 @@ def shared_favorites_path(profile, music_root_hint=""):
     return root.rstrip("/\\") + "/.rotation/favorites.json"
 
 
-def _read_vfs(path):
+def _read_vfs(path, key="favorites"):
+    """Read a shared JSON file whose payload carries `key` (list or dict)."""
     for candidate in (path, path + ".bak"):
         try:
             if not xbmcvfs.exists(candidate):
@@ -106,14 +107,14 @@ def _read_vfs(path):
             raw = handle.read()
             handle.close()
             payload = json.loads(raw) if raw else {}
-            if isinstance(payload, dict) and isinstance(payload.get("favorites"), list):
+            if isinstance(payload, dict) and isinstance(payload.get(key), (list, dict)):
                 return payload
         except (ValueError, TypeError):
             continue
     return {}
 
 
-def _write_vfs(path, payload):
+def _write_vfs(path, payload, key="favorites"):
     parent = path.replace("\\", "/").rsplit("/", 1)[0]
     if not xbmcvfs.mkdirs(parent) and not xbmcvfs.exists(parent):
         return False
@@ -122,7 +123,7 @@ def _write_vfs(path, payload):
         handle = xbmcvfs.File(temporary, "w")
         handle.write(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True))
         handle.close()
-        if not _read_vfs(temporary):
+        if not _read_vfs(temporary, key):
             xbmcvfs.delete(temporary)
             return False
         backup = path + ".bak"
@@ -158,14 +159,29 @@ class SharedFavoritesStore(object):
                     "Rotation could not write to the selected Kodi music source. "
                     "Check the folder's sharing permissions and Kodi's SMB credentials.")
 
+    # Directory builds ask is_favorite()/get_favorites() once per row, and
+    # most callers build a fresh store each time. Re-reading the shared file
+    # over SMB for every row of a 100-album page cost ~4-5 s per load, so
+    # reads are shared for a few seconds - far shorter than the time it
+    # takes to notice another device's change by navigating.
+    _ROWS_TTL = 5.0
+    _ROWS_CACHE = {}
+
     def _rows(self):
+        cached = self._ROWS_CACHE.get(self.path)
+        if cached and time.time() - cached[0] < self._ROWS_TTL:
+            return [dict(row) for row in cached[1]]
         payload = _read_vfs(self.path)
-        return payload.get("favorites", []) if payload else []
+        rows = payload.get("favorites", []) if payload else []
+        self._ROWS_CACHE[self.path] = (time.time(), [dict(row) for row in rows])
+        return rows
 
     def _save(self, rows):
         if not _write_vfs(self.path, {"version": 1, "updated": time.time(),
                                      "favorites": rows}):
+            self._ROWS_CACHE.pop(self.path, None)
             raise IOError("Could not update the shared Rotation favorites file")
+        self._ROWS_CACHE[self.path] = (time.time(), [dict(row) for row in rows])
 
     def add_favorite(self, kind, url, label, thumb="", artist="", album=""):
         rows = [row for row in self._rows() if row.get("url") != url]

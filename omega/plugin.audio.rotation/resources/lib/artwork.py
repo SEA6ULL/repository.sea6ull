@@ -25,10 +25,12 @@ import logging
 import re
 import threading
 import time
+import unicodedata
 from urllib.parse import quote_plus
 
 import requests
 import xbmc
+from .library import art_artist_name, library_artist_mbid, library_album_art
 
 from .storage import db, BaseModel
 from .peewee import CharField, TextField, FloatField
@@ -117,7 +119,24 @@ MB_ATTEMPTS = 2
 
 # Cache lifetimes
 HIT_TTL  = 30 * 24 * 3600   # 30 days — artwork URLs are stable
-MISS_TTL = 3 * 24 * 3600    # 3 days  — coverage improves over time
+MISS_TTL = 3 * 24 * 3600    # Album misses
+# How long a *confirmed* absence (the service answered "nothing") stands
+# before an artist row's missing assets are asked for again. Transient
+# failures are never cached, so this is not a retry interval: a short value
+# here only re-runs the throttled MusicBrainz -> fanart.tv chain for artists
+# that genuinely have no background or logo. 1.0.44 used 15 minutes, which
+# put most of a large playlist back through the 1 req/s queue on every
+# visit. Three days still lets newly uploaded fanart.tv art appear promptly.
+ARTIST_MISS_TTL = 3 * 24 * 3600
+# Artist rows written before 1.0.45 carry no MusicBrainz ID. Some recorded
+# absences that were really failures (e.g. fanart.tv error bodies before
+# 1.0.44), so their missing assets are re-checked on the old 15-minute rule
+# once; the re-check stores an ID (or NO_MBID) and the row becomes normal.
+LEGACY_ARTIST_MISS_TTL = 15 * 60
+# Stored in the mbid column when MusicBrainz was asked and had no match, so
+# a row from this version is never mistaken for a legacy one.
+NO_MBID = "none"
+_MBID_MIGRATED = False
 
 # MusicBrainz asks for one request per second, maximum.
 _MB_MIN_INTERVAL = 1.1
@@ -138,29 +157,78 @@ class ArtworkCache(BaseModel):
     # P_* constants; the empty string means "nothing, or written by a
     # version that predates this column".
     tried      = TextField(default="")
+    # MusicBrainz ID this row was resolved against (artist ID for artist
+    # rows, release-group ID for cover rows). Caching it means a reopened
+    # row goes straight to fanart.tv/TheAudioDB instead of repeating the
+    # throttled name search.
+    mbid       = TextField(default="")
     fetched_at = FloatField(default=0.0)
 
 
+_EDITION_SUFFIX = re.compile(
+    r"\s*[\(\[][^)\]]*"
+    r"(deluxe|remaster|remastered|edition|expanded|anniversary|bonus|"
+    r"explicit|clean|reissue|version|mono|stereo)"
+    r"[^)\]]*[\)\]]")
+
+
 def _norm(value):
-    """Loose normalisation for comparing artist/album names across services."""
+    """Loose normalisation for comparing artist/album names across services.
+
+    Accents are folded to their base letters ("Beyoncé" -> "beyonce",
+    "Björk" -> "bjork") and letters from any alphabet are kept. The previous
+    version dropped every character outside a-z, which turned "Beyoncé"
+    into "beyonc" - so it never matched "Beyonce" from another service - and
+    reduced Cyrillic or Japanese names to an empty string that all such
+    artists then shared.
+    """
     if not value:
         return ""
-    value = value.lower()
+    value = unicodedata.normalize("NFKD", str(value))
+    value = "".join(c for c in value if not unicodedata.combining(c)).lower()
     # Drop edition suffixes that stop otherwise-identical albums matching
-    value = re.sub(
-        r"\s*[\(\[][^)\]]*"
-        r"(deluxe|remaster|remastered|edition|expanded|anniversary|bonus|"
-        r"explicit|clean|reissue|version|mono|stereo)"
-        r"[^)\]]*[\)\]]",
-        "", value
-    )
+    value = _EDITION_SUFFIX.sub("", value)
     # "&" and "and" are used interchangeably across services and in URL
     # slugs, so fold them together before stripping punctuation. Without
     # this, "Doo-Wops & Hooligans" and "doo-wops-and-hooligans" normalise
     # to different strings and never match.
     value = value.replace("&", " and ").replace("+", " and ")
-    value = re.sub(r"[^a-z0-9]+", "", value)
-    return value
+    return re.sub(r"[\W_]+", "", value)
+
+
+def _norm_legacy(value):
+    """The pre-1.0.61 normalisation; only used to find older cache rows."""
+    if not value:
+        return ""
+    value = _EDITION_SUFFIX.sub("", str(value).lower())
+    value = value.replace("&", " and ").replace("+", " and ")
+    return re.sub(r"[^a-z0-9]+", "", value)
+
+
+def _mb_completeness(entry):
+    """
+    How fully a MusicBrainz artist entry is filled in.
+
+    Several entries can carry exactly the same name and the same search
+    score. Miley Cyrus is one: a second "Miley Cyrus" entry with no type,
+    area, dates or aliases scored 100 and was picked over the real one, so
+    fanart.tv (which only knows the real MBID) returned nothing. A real,
+    established artist is a typed Person or Group with dates, an area,
+    aliases, tags or ISNI codes; a stub or duplicate rarely has any.
+    """
+    score = 0
+    if entry.get("type"):
+        score += 3
+    if entry.get("isnis"):
+        score += 2
+    for field in ("gender", "aliases", "tags", "disambiguation"):
+        if entry.get(field):
+            score += 1
+    if entry.get("country") or entry.get("area"):
+        score += 1
+    if (entry.get("life-span") or {}).get("begin"):
+        score += 1
+    return score
 
 
 def _same_artist(a, b):
@@ -275,6 +343,12 @@ class ArtworkProvider:
                     % ArtworkCache._meta.table_name)
                 _log("cache: added 'tried' column to existing table", xbmc.LOGINFO)
                 self._drop_guessed_portraits()
+            if "mbid" not in columns:
+                db.execute_sql(
+                    "ALTER TABLE %s ADD COLUMN mbid TEXT NOT NULL DEFAULT ''"
+                    % ArtworkCache._meta.table_name)
+                _log("cache: added MusicBrainz ID column", xbmc.LOGINFO)
+            self._migrate_unconfirmed_mbids()
             if "logo" not in columns:
                 db.execute_sql(
                     "ALTER TABLE %s ADD COLUMN logo TEXT NOT NULL DEFAULT ''"
@@ -283,6 +357,38 @@ class ArtworkProvider:
                      xbmc.LOGINFO)
         except Exception as exc:
             _log("could not add 'tried' column: %s" % exc, xbmc.LOGWARNING)
+
+    def _migrate_unconfirmed_mbids(self):
+        """
+        One-time: forget MBIDs chosen by the 1.0.45-1.0.47 matcher that
+        produced neither fanart nor a logo.
+
+        That matcher took the first exact-name result, which could be a
+        duplicate entry with no art (Miley Cyrus). Clearing the ID makes the
+        row look legacy, so it is re-checked once with the ranked matcher.
+        Rows with art, and rows with no MusicBrainz match, are untouched.
+        """
+        global _MBID_MIGRATED
+        if _MBID_MIGRATED:
+            return
+        _MBID_MIGRATED = True
+        marker = "__migration:mbid_rank_v2"
+        try:
+            if ArtworkCache.get_or_none(ArtworkCache.key == marker):
+                return
+            changed = (ArtworkCache.update(mbid="")
+                       .where((ArtworkCache.source.in_(list(ARTIST_SOURCES))) &
+                              (ArtworkCache.mbid != "") &
+                              (ArtworkCache.mbid != NO_MBID) &
+                              (ArtworkCache.fanart == "") &
+                              (ArtworkCache.logo == ""))
+                       .execute())
+            ArtworkCache.replace(key=marker, source="meta",
+                                 fetched_at=time.time()).execute()
+            _log("cache: %d artist(s) queued for a re-check with ranked "
+                 "MusicBrainz matching" % changed, xbmc.LOGINFO)
+        except Exception as exc:
+            _log("MBID migration skipped: %s" % exc, xbmc.LOGWARNING)
 
     def _drop_guessed_portraits(self):
         """
@@ -327,9 +433,21 @@ class ArtworkProvider:
             self._local.session = session
         return session
 
+    def _remember_legacy(self, key, legacy_raw, legacy_parts):
+        """Note the pre-1.0.61 key for `key` so its cached row can be reused."""
+        if all(legacy_parts):
+            legacy = hashlib.md5(legacy_raw.encode("utf-8")).hexdigest()
+            if legacy != key:
+                if not hasattr(self, "_legacy_keys"):
+                    self._legacy_keys = {}
+                self._legacy_keys[key] = legacy
+
     def _key(self, artist, album):
         raw = "{0}|{1}".format(_norm(artist), _norm(album))
-        return hashlib.md5(raw.encode("utf-8")).hexdigest()
+        key = hashlib.md5(raw.encode("utf-8")).hexdigest()
+        old = (_norm_legacy(artist), _norm_legacy(album))
+        self._remember_legacy(key, "{0}|{1}".format(*old), old)
+        return key
 
     def _artist_key(self, artist):
         """
@@ -341,11 +459,25 @@ class ArtworkProvider:
         never suppress the background lookup the way it used to.
         """
         raw = "artistbg|{0}".format(_norm(artist))
+        old = _norm_legacy(artist)
+        self._remember_legacy(hashlib.md5(raw.encode("utf-8")).hexdigest(),
+                              "artistbg|{0}".format(old), (old,))
         return hashlib.md5(raw.encode("utf-8")).hexdigest()
 
     def _cached(self, key):
         try:
             row = ArtworkCache.get_or_none(ArtworkCache.key == key)
+            legacy = getattr(self, "_legacy_keys", {}).get(key)
+            if not row and legacy:
+                # Saved under the pre-1.0.61 key: carry it over once.
+                row = ArtworkCache.get_or_none(ArtworkCache.key == legacy)
+                if row:
+                    ArtworkCache.replace(
+                        key=key, thumb=row.thumb, fanart=row.fanart,
+                        logo=getattr(row, "logo", "") or "", source=row.source,
+                        tried=getattr(row, "tried", "") or "",
+                        mbid=getattr(row, "mbid", "") or "",
+                        fetched_at=row.fetched_at).execute()
         except Exception:
             return None
         if not row:
@@ -356,17 +488,31 @@ class ArtworkProvider:
         if age > ttl:
             return None
 
+        tried = set(filter(None, (getattr(row, "tried", "") or "").split(",")))
+        # A successful portrait must not lock absent backgrounds/logos out
+        # for the portrait's 30-day lifetime. Keep hits and reopen only the
+        # providers that could supply a missing asset after 15 minutes.
+        legacy = not (getattr(row, "mbid", "") or "")
+        reopen_after = LEGACY_ARTIST_MISS_TTL if legacy else ARTIST_MISS_TTL
+        if row.source in ARTIST_SOURCES and age >= reopen_after:
+            if not row.thumb:
+                tried.difference_update((P_DEEZER, P_AUDIODB, P_FANARTTV))
+            if self.want_backgrounds and not row.fanart:
+                tried.difference_update((P_AUDIODB, P_FANARTTV))
+            if self.key and not getattr(row, "logo", ""):
+                tried.discard(P_FANARTTV_LOGO)
         return {"thumb": row.thumb, "fanart": row.fanart,
                 "logo": getattr(row, "logo", "") or "",
+                "mbid": getattr(row, "mbid", "") or "",
                 "source": row.source,
-                "tried": getattr(row, "tried", "") or ""}
+                "tried": ",".join(sorted(tried))}
 
-    def _store(self, key, thumb, fanart, source, tried=None, logo=""):
+    def _store(self, key, thumb, fanart, source, tried=None, logo="", mbid=""):
         try:
             ArtworkCache.replace(
                 key=key, thumb=thumb or "", fanart=fanart or "", logo=logo or "",
                 source=source or "", tried=",".join(sorted(tried or ())),
-                fetched_at=time.time()
+                mbid=mbid or "", fetched_at=time.time()
             ).execute()
         except Exception as exc:
             _log("could not write cache: %s" % exc, xbmc.LOGWARNING)
@@ -426,11 +572,11 @@ class ArtworkProvider:
     # Cover providers
     # ----------------------------------------------------------------- #
 
-    def _deezer_cover(self, artist, album):
+    def _deezer_cover(self, artist, album, timeout=None):
         query = 'artist:"{0}" album:"{1}"'.format(artist, album)
         data = self._get_json(
             "https://api.deezer.com/search/album",
-            {"q": query, "limit": 5},
+            {"q": query, "limit": 5}, timeout=timeout,
         )
         if not data or not data.get("data"):
             return ""
@@ -522,7 +668,10 @@ class ArtworkProvider:
             {"query": query, "fmt": "json", "limit": 5},
             timeout=MB_TIMEOUT, attempts=MB_ATTEMPTS,
         )
-        if not data or data is FAILED:
+        if data is FAILED:
+            # Not "no match": callers must not cache this as absent.
+            return FAILED
+        if not data:
             return ""
 
         for rg in data.get("release-groups", []):
@@ -536,22 +685,69 @@ class ArtworkProvider:
         return ""
 
     def _mb_artist(self, artist):
-        """Return an artist MBID, or "" if there's no confident match."""
+        """Best artist MBID, "" when there's no confident match, or FAILED."""
+        found = self._mb_artist_candidates(artist)
+        if found is FAILED:
+            return FAILED
+        return found[0] if found else ""
+
+    def _mb_artist_candidates(self, artist):
+        """
+        Exact-name MusicBrainz matches for an artist, best first.
+
+        Returns a list of MBIDs ([] when nothing matches) or FAILED.
+
+        Matches the artist's MusicBrainz name first, then its registered
+        aliases. Aliases matter for renamed artists and for credits that
+        services spell differently: MusicBrainz lists "Ye" with the alias
+        "Kanye West", and "Goo Goo Dolls" without the leading "The" that
+        Deezer uses - both previously came back as "no match", which left
+        them without fanart.tv art. Alias matches are still exact, so this
+        does not loosen the rule that keeps Adele from matching a namesake.
+        """
+        name = (artist or "").replace('"', " ").strip()
+        if not name:
+            return []
+        variants = [name]
+        if name.lower().startswith("the "):
+            variants.append(name[4:].strip())
+        clauses = []
+        for variant in variants:
+            clauses += ['artist:"%s"' % variant, 'alias:"%s"' % variant]
         self._mb_throttle()
         data = self._get_json(
             "https://musicbrainz.org/ws/2/artist",
-            {"query": 'artist:"{0}"'.format(artist), "fmt": "json", "limit": 5},
+            {"query": " OR ".join(clauses), "fmt": "json", "limit": 10},
             timeout=MB_TIMEOUT, attempts=MB_ATTEMPTS,
         )
         if data is FAILED:
             return FAILED
         if not data:
-            return ""
+            return []
 
-        for entry in data.get("artists", []):
-            if _same_artist(entry.get("name", ""), artist):
-                return entry.get("id", "")
-        return ""
+        def _rank(entry):
+            return (bool(entry.get("type")), int(entry.get("score", 0) or 0),
+                    _mb_completeness(entry))
+
+        entries = data.get("artists", [])
+        named = sorted((e for e in entries
+                        if _same_artist(e.get("name", ""), artist)),
+                       key=_rank, reverse=True)
+        aliased = sorted((e for e in entries if e not in named and any(
+                              _same_artist(a.get("name", ""), artist)
+                              for a in e.get("aliases") or [] if a.get("name"))),
+                         key=_rank, reverse=True)
+        candidates = named + aliased
+        if not candidates:
+            return []
+        best = candidates[0]
+        _log("MusicBrainz artist %r -> %s%s (type=%s score=%s detail=%d, "
+             "%d exact-name candidate(s))" %
+             (artist, best.get("id", ""),
+              "" if best in named else " via alias of %r" % best.get("name", ""),
+              best.get("type", ""), best.get("score", ""),
+              _mb_completeness(best), len(candidates)), xbmc.LOGINFO)
+        return [e.get("id", "") for e in candidates if e.get("id")]
 
     def _caa_cover(self, release_group_mbid):
         if not release_group_mbid:
@@ -623,6 +819,9 @@ class ArtworkProvider:
                 "thumb": (entry.get("strArtistThumb")
                           or entry.get("strArtistWideThumb") or ""),
                 "background": entry.get("strArtistFanart") or "",
+                # TheAudioDB has no votes, so its logo is only a fallback
+                # for artists fanart.tv has none for (or when no key is set).
+                "logo": entry.get("strArtistLogo") or "",
             }
         return empty
 
@@ -651,9 +850,18 @@ class ArtworkProvider:
             {"api_key": self.key}, attempts=2,
         )
         if data is FAILED:
+            _log("fanart.tv artist %s request failed" % artist_mbid, xbmc.LOGWARNING)
             return FAILED
         if not data:
-            return empty
+            _log("fanart.tv artist %s returned no artwork data" % artist_mbid, xbmc.LOGINFO)
+            return dict(empty, found=False)
+        if data.get("error"):
+            _log("fanart.tv artist %s returned an API error" % artist_mbid, xbmc.LOGWARNING)
+            return FAILED
+        _log("fanart.tv artist %s (%s): thumbs=%d backgrounds=%d HD logos=%d logos=%d" %
+             (artist_mbid, data.get("name", ""), len(data.get("artistthumb") or []),
+              len(data.get("artistbackground") or []), len(data.get("hdmusiclogo") or []),
+              len(data.get("musiclogo") or [])), xbmc.LOGINFO)
 
         def _best(entries):
             """Highest-rated image URL from a fanart.tv asset list."""
@@ -678,6 +886,31 @@ class ArtworkProvider:
             "logo":       _best(data.get("hdmusiclogo")) or
                           _best(data.get("musiclogo")),
         }
+
+    def _fanarttv_album_cover(self, release_group_mbid):
+        """
+        Highest-voted album cover from fanart.tv, by release-group MBID.
+
+        This is the only cover source with community votes, so it is asked
+        first whenever a key is configured. Returns FAILED on a transient
+        error, otherwise a URL or "".
+        """
+        if not self.key or not release_group_mbid:
+            return ""
+        data = self._get_json(
+            "https://webservice.fanart.tv/v3/music/albums/{0}".format(
+                release_group_mbid),
+            {"api_key": self.key}, attempts=2,
+        )
+        if data is FAILED:
+            return FAILED
+        if not data or data.get("error") or data.get("status") == "error":
+            return ""
+        album = (data.get("albums") or {}).get(release_group_mbid) or {}
+        covers = sorted(album.get("albumcover") or [],
+                        key=lambda e: int(e.get("likes", 0) or 0),
+                        reverse=True)
+        return covers[0].get("url", "") if covers else ""
 
     # ----------------------------------------------------------------- #
     # Public API
@@ -732,11 +965,9 @@ class ArtworkProvider:
             if time.time() >= deadline:
                 return None
             try:
-                previous, self.timeout = self.timeout, req_timeout
-                try:
-                    cover = self._deezer_cover(artist, album)
-                finally:
-                    self.timeout = previous
+                # Passed per call: workers used to swap self.timeout, which
+                # raced between threads and could leave it at the short value.
+                cover = self._deezer_cover(artist, album, timeout=req_timeout)
             except Exception as exc:
                 _log("bulk worker failed for %r / %r: %s" % (artist, album, exc))
                 return None
@@ -770,9 +1001,13 @@ class ArtworkProvider:
         for artist, album, key, cover in resolved:
             if cover:
                 hits += 1
-                self._store(key, cover, "", "deezer")
+                # Recorded as Deezer-only: album_art() will still ask the
+                # voted source (fanart.tv) once when a key is configured.
+                self._store(key, cover, "", "deezer", tried=(P_DEEZER,))
                 results[(artist, album)] = {
-                    "thumb": cover, "fanart": "", "source": "deezer"
+                    "thumb": cover, "fanart": "", "source": "deezer",
+                    "settled": self._cover_settled({"thumb": cover,
+                                                    "tried": P_DEEZER}),
                 }
             else:
                 # Recorded so the next visit to this grid does not repeat
@@ -784,29 +1019,46 @@ class ArtworkProvider:
              xbmc.LOGINFO)
         return results
 
+    def _cover_settled(self, cached):
+        """
+        True when a cover row needs no further lookup.
+
+        A cover counts as final once the voted source has been asked, or
+        when there is no voted source to ask (no fanart.tv key). Rows written
+        before 1.0.45 have an empty "tried" column; with a key configured
+        they are upgraded once, in the background.
+        """
+        if not cached or cached.get("source") == BULK_MISS:
+            return False
+        if not self.key:
+            return True
+        tried = set((cached.get("tried") or "").split(","))
+        return P_FANARTTV in tried
+
     def album_art_cached(self, artist, album):
         """
         Return already-resolved artwork, or None. Never hits the network.
 
-        Grid listings use this. A genre page can hold 40 albums, and doing
-        live lookups there would mean 40 sequential HTTP requests while the
-        user stares at an empty screen. Instead the listing shows whatever
-        previous album visits have already resolved, so coverage fills in
-        as you browse.
+        The returned dict carries "settled": False when the cover is usable
+        but a voted cover has not been checked yet, so callers can show it
+        now and queue the upgrade.
         """
         if not artist or not album:
             return None
         cached = self._cached(self._key(artist, album))
-        if cached is not None and cached.get("source") == BULK_MISS:
+        if cached is None or cached.get("source") == BULK_MISS:
             return None
+        cached["settled"] = self._cover_settled(cached)
         return cached
 
-    def album_art(self, artist, album):
+    def album_art(self, artist, album, release_group_mbid=""):
         """
         Resolve artwork for one album.
 
-        Returns {"thumb": url, "fanart": url, "source": str}. Any field may
-        be an empty string; callers must fall back to site artwork.
+        Cover order: fanart.tv albumcover (highest-voted) when a key is set,
+        then Deezer, iTunes and the Cover Art Archive. Returns {"thumb",
+        "fanart", "source"}; any field may be empty and callers must fall
+        back to library or site artwork.
         """
         if not artist or not album:
             _log("skipped: missing artist (%r) or album (%r)" % (artist, album))
@@ -821,7 +1073,7 @@ class ArtworkProvider:
         key = self._key(artist, album)
         cached = self._cached(key)
 
-        if cached is not None and cached.get("source") != BULK_MISS:
+        if cached is not None and self._cover_settled(cached):
             _log("cover cache hit for %r / %r (thumb=%s)"
                  % (artist, album, cached.get("thumb") or "NONE"))
             return {
@@ -830,26 +1082,50 @@ class ArtworkProvider:
                 "source": cached.get("source", "") + "+cached",
             }
 
-        # A bulk miss only means Deezer had nothing. The rest of the chain
-        # has not been tried yet, so fall through rather than trusting it.
-        thumb, source = "", ""
+        usable = cached if (cached and cached.get("source") != BULK_MISS) else {}
+        tried = set(filter(None, (usable.get("tried") or "").split(",")))
+        thumb, source = usable.get("thumb", ""), usable.get("source", "")
+        rg_mbid = (release_group_mbid or usable.get("mbid") or
+                   library_album_art(artist, album).get("mbid", ""))
 
-        thumb = self._deezer_cover(artist, album)
-        if thumb:
-            source = "deezer"
+        # 1. The voted source. Needs a release-group MBID.
+        if self.key and P_FANARTTV not in tried:
+            if not rg_mbid:
+                rg_mbid = self._mb_release_group(artist, album)
+            if rg_mbid is FAILED:
+                _log("MusicBrainz unavailable for %r / %r - keeping current "
+                     "cover, not caching a miss" % (artist, album),
+                     xbmc.LOGWARNING)
+                return {"thumb": thumb or "", "fanart": fanart, "source": source}
+            voted = self._fanarttv_album_cover(rg_mbid) if rg_mbid else ""
+            if voted is FAILED:
+                _log("fanart.tv unavailable for %r / %r - keeping current cover"
+                     % (artist, album), xbmc.LOGWARNING)
+                return {"thumb": thumb, "fanart": fanart, "source": source}
+            tried.add(P_FANARTTV)
+            if voted:
+                thumb, source = voted, "fanarttv"
 
+        # 2. Unvoted sources, only when nothing better exists.
+        if not thumb and P_DEEZER not in tried:
+            thumb = self._deezer_cover(artist, album)
+            tried.add(P_DEEZER)
+            if thumb:
+                source = "deezer"
         if not thumb:
             thumb = self._itunes_cover(artist, album)
             if thumb:
                 source = "itunes"
-
         if not thumb:
-            rg_mbid = self._mb_release_group(artist, album)
+            if not rg_mbid:
+                rg_mbid = self._mb_release_group(artist, album)
+            if rg_mbid is FAILED:
+                rg_mbid = ""
             thumb = self._caa_cover(rg_mbid)
             if thumb:
                 source = "coverartarchive"
 
-        self._store(key, thumb, "", source)
+        self._store(key, thumb, "", source, tried=tried, mbid=rg_mbid)
         _log("resolved %r / %r -> thumb=%s fanart=%s via %s"
              % (artist, album, thumb or "NONE", fanart or "NONE",
                 source or "NONE"),
@@ -902,7 +1178,7 @@ class ArtworkProvider:
         tried = set((cached.get("tried") or "").split(","))
         return P_FANARTTV_LOGO in tried
 
-    def artist_art(self, artist):
+    def artist_art(self, artist, mbid=""):
         """
         Resolve an artist's portrait and background, cached per artist.
 
@@ -924,12 +1200,27 @@ class ArtworkProvider:
         Transient failures are never cached - a service that did not answer
         tells us nothing about whether the artist has a picture.
         """
+        artist = art_artist_name(artist)
         blank = {"thumb": "", "fanart": "", "clearlogo": ""}
         if not artist:
             return blank
 
         key    = self._artist_key(artist)
         cached = self._cached(key)
+        # Kodi's own tags are exact; a name search can pick a namesake.
+        known_mbid = mbid or library_artist_mbid(artist)
+
+        cached_mbid = (cached or {}).get("mbid", "")
+        if cached_mbid == NO_MBID:
+            cached_mbid = ""
+        if (cached is not None and known_mbid and cached_mbid
+                and cached_mbid != known_mbid):
+            # Resolved against a different artist than the one in the user's
+            # library. Discard it rather than show a confident wrong face.
+            _log("artist %r cached under MBID %s but library says %s - "
+                 "re-resolving" % (artist, cached_mbid, known_mbid),
+                 xbmc.LOGINFO)
+            cached = None
 
         if cached is not None:
             thumb      = cached.get("thumb", "")
@@ -941,14 +1232,20 @@ class ArtworkProvider:
                     and self._background_settled(cached)
                     and self._logo_settled(cached)):
                 return {"thumb": thumb, "fanart": background, "clearlogo": logo}
+            known_mbid = known_mbid or cached_mbid
         else:
             thumb, background, logo, source, tried = "", "", "", "", set()
+        resolved_mbid = known_mbid
 
         def _result():
             return {"thumb": thumb, "fanart": background, "clearlogo": logo}
 
-        # 1. Deezer.
-        if not thumb and P_DEEZER not in tried:
+        # 1. Deezer - fast, unvoted. Skipped when fanart.tv is about to be
+        #    asked anyway with a known MBID: its voted portrait would replace
+        #    Deezer's, so the Deezer request would only be thrown away. It is
+        #    still asked afterwards if fanart.tv has no portrait.
+        voted_next = bool(self.key and known_mbid and P_FANARTTV not in tried)
+        if not thumb and P_DEEZER not in tried and not voted_next:
             found = self._deezer_artist_image(artist)
             if found is FAILED:
                 _log("Deezer unavailable for %r - not caching a miss" % artist,
@@ -960,6 +1257,7 @@ class ArtworkProvider:
 
         # 2/3. MusicBrainz-keyed sources. Worth the throttled lookup when a
         # background is still wanted, or when nothing has a portrait yet.
+        audiodb_logo    = ""
         need_portrait   = not thumb
         need_background = bool(self._background_providers()) and not background
         need_logo       = bool(self.key) and not self._logo_settled(
@@ -969,7 +1267,16 @@ class ArtworkProvider:
                                              P_FANARTTV_LOGO not in tried)))
 
         if (need_portrait or need_background or need_logo) and mbid_useful:
-            mbid = self._mb_artist(artist)
+            if known_mbid:
+                candidates = [known_mbid]
+            else:
+                candidates = self._mb_artist_candidates(artist)
+            if candidates is FAILED:
+                mbid = FAILED
+            else:
+                mbid = candidates[0] if candidates else ""
+            if mbid and mbid is not FAILED:
+                resolved_mbid = mbid
 
             if mbid is FAILED:
                 _log("MusicBrainz unavailable for %r - not caching a miss"
@@ -986,7 +1293,43 @@ class ArtworkProvider:
                     tried.add(P_FANARTTV)
                     tried.add(P_FANARTTV_LOGO)
 
-            if self.audiodb_key and P_AUDIODB not in tried:
+            # Voted source first. TheAudioDB is then asked only for what is
+            # still missing: on the free key it is throttled to one request
+            # every 2.1 s, which set the pace of a whole playlist pass.
+            if self.key and mbid and (P_FANARTTV not in tried or
+                                      P_FANARTTV_LOGO not in tried):
+                assets = self._fanarttv(mbid)
+                # fanart.tv has no record at all for this MBID. When the name
+                # search found other entries with exactly the same name, the
+                # chosen one may be a duplicate; fanart.tv only indexes the
+                # established entry. Never applies to Kodi's own MBIDs.
+                for alternative in candidates[1:3]:
+                    if assets is FAILED or assets.get("found", True):
+                        break
+                    _log("fanart.tv has no record for %s - trying exact-name "
+                         "match %s for %r" % (mbid, alternative, artist),
+                         xbmc.LOGINFO)
+                    other = self._fanarttv(alternative)
+                    if other is FAILED:
+                        assets = FAILED
+                    elif other.get("found", True):
+                        mbid = resolved_mbid = alternative
+                        assets = other
+                if assets is FAILED:
+                    _log("fanart.tv unavailable for %r - not caching a miss"
+                         % artist, xbmc.LOGWARNING)
+                    return _result()
+                tried.add(P_FANARTTV)
+                tried.add(P_FANARTTV_LOGO)
+                if assets.get("thumb"):
+                    thumb, source = assets["thumb"], SRC_FANARTTV
+                background = assets.get("background", "") or background
+                logo = assets.get("logo", "") or logo
+
+            still_missing = (source != SRC_FANARTTV or
+                             (self.want_backgrounds and not background) or
+                             not logo)
+            if (self.audiodb_key and P_AUDIODB not in tried and still_missing):
                 assets = self._audiodb_artist(mbid=mbid) if mbid else None
                 if assets is FAILED:
                     _log("TheAudioDB unavailable for %r - not caching a miss"
@@ -1000,24 +1343,22 @@ class ArtworkProvider:
                              "miss" % artist, xbmc.LOGWARNING)
                         return _result()
                 tried.add(P_AUDIODB)
-                if assets.get("thumb"):
+                if assets.get("thumb") and source != SRC_FANARTTV:
                     # Hand-picked portrait beats a search result.
                     thumb, source = assets["thumb"], SRC_AUDIODB
                 background = background or assets.get("background", "")
+                audiodb_logo = assets.get("logo", "")
 
-            if self.key and mbid and (P_FANARTTV not in tried or
-                                      P_FANARTTV_LOGO not in tried):
-                assets = self._fanarttv(mbid)
-                if assets is FAILED:
-                    _log("fanart.tv unavailable for %r - not caching a miss"
-                         % artist, xbmc.LOGWARNING)
-                    return _result()
-                tried.add(P_FANARTTV)
-                tried.add(P_FANARTTV_LOGO)
-                if assets.get("thumb"):
-                    thumb, source = assets["thumb"], SRC_FANARTTV
-                background = assets.get("background", "") or background
-                logo = assets.get("logo", "") or logo
+            # Unvoted logo only when the voted source had none.
+            logo = logo or audiodb_logo
+
+        # Deezer as the last resort when it was deferred for fanart.tv.
+        if not thumb and P_DEEZER not in tried:
+            found = self._deezer_artist_image(artist)
+            if found is not FAILED:
+                tried.add(P_DEEZER)
+                if found:
+                    thumb, source = found, SRC_DEEZER
 
         # A name-only TheAudioDB pass, for artists MusicBrainz could not
         # place at all.
@@ -1031,8 +1372,11 @@ class ArtworkProvider:
             if assets.get("thumb"):
                 thumb, source = assets["thumb"], SRC_AUDIODB
             background = background or assets.get("background", "")
+            logo = logo or assets.get("logo", "")
 
-        self._store(key, thumb, background, source or SRC_NONE, tried, logo=logo)
+        self._store(key, thumb, background, source or SRC_NONE, tried, logo=logo,
+                    mbid=(resolved_mbid if resolved_mbid and
+                          resolved_mbid is not FAILED else NO_MBID))
         _log("artist art for %r -> thumb=%s background=%s logo=%s via %s (asked: %s)"
              % (artist, thumb or "NONE", background or "NONE", logo or "NONE",
                 source or "NONE", ",".join(sorted(tried)) or "nothing"),
@@ -1047,6 +1391,7 @@ class ArtworkProvider:
         to hand the artist to a background worker. An empty string means
         every available provider has been asked and none had a portrait.
         """
+        artist = art_artist_name(artist)
         if not artist:
             return ""
         cached = self._cached(self._artist_key(artist))
@@ -1064,6 +1409,7 @@ class ArtworkProvider:
         to kick off a background resolve. An empty string means the lookup
         has run and there genuinely is no background.
         """
+        artist = art_artist_name(artist)
         if not artist or not self._background_providers():
             return ""
         cached = self._cached(self._artist_key(artist))
@@ -1073,12 +1419,19 @@ class ArtworkProvider:
 
     def artist_logo_cached(self, artist):
         """Cached clearlogo, or None when fanart.tv has not been checked."""
-        if not artist or not self.key:
+        artist = art_artist_name(artist)
+        if not artist:
             return ""
         cached = self._cached(self._artist_key(artist))
+        if cached and cached.get("logo"):
+            return cached["logo"]
+        if not self.key:
+            # No voted source to wait for. A TheAudioDB logo, if any, arrives
+            # with the portrait lookup.
+            return ""
         if cached is None or not self._logo_settled(cached):
             return None
-        return cached.get("logo", "")
+        return ""
 
     def artist_background(self, artist):
         """
@@ -1089,6 +1442,7 @@ class ArtworkProvider:
         missing background does not trigger a MusicBrainz lookup on every
         single album by that artist.
         """
+        artist = art_artist_name(artist)
         if not self.want_backgrounds:
             return ""
         return self.artist_art(artist).get("fanart", "")
@@ -1145,6 +1499,23 @@ class ArtworkProvider:
             "artists":     artists,
             "artist_hits": artist_hits,
         }
+
+    def forget(self, artist="", album=""):
+        """Drop one artist's row (and one album's cover row) so the next
+        lookup starts from scratch. Returns the number of rows removed."""
+        keys = []
+        name = art_artist_name(artist)
+        if name:
+            keys.append(self._artist_key(name))
+        if artist and album:
+            keys.append(self._key(artist, album))
+        if not keys:
+            return 0
+        try:
+            return ArtworkCache.delete().where(ArtworkCache.key.in_(keys)).execute()
+        except Exception as exc:
+            _log("could not forget artwork: %s" % exc, xbmc.LOGWARNING)
+            return 0
 
     def clear(self):
         try:

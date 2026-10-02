@@ -10,6 +10,10 @@ from urllib.parse import unquote, urlparse, parse_qs
 import xbmc
 import xbmcaddon
 import xbmcgui
+import xbmcvfs
+from resources.lib.cache_maintenance import prune_cache_files
+from resources.lib.downloads import start_worker as start_download_worker
+from resources.lib import stream_slots
 
 
 ADDON = xbmcaddon.Addon("plugin.audio.rotation")
@@ -18,6 +22,19 @@ PENDING_REFRESH_TTL = 30 * 60
 GUI_SETTLE_SECONDS = 3
 _LAST_UNSAFE_GUI = time.monotonic()
 _LOOKAHEAD_STOPPED_AT = 0.0
+
+
+def _player_shuffled():
+    """Kodi's music shuffle flag (the player's shuffle button)."""
+    try:
+        result = json.loads(xbmc.executeJSONRPC(json.dumps({
+            "jsonrpc": "2.0", "id": 1, "method": "Playlist.GetProperties",
+            "params": {"playlistid": 0, "properties": ["shuffled"]}}))).get("result") or {}
+        if "shuffled" in result:
+            return bool(result["shuffled"])
+    except Exception:
+        pass
+    return bool(xbmc.getCondVisibility("Playlist.IsRandom"))
 
 
 def _maintain_playback_lookahead():
@@ -35,17 +52,29 @@ def _maintain_playback_lookahead():
         elif time.monotonic() - _LOOKAHEAD_STOPPED_AT > 12:
             window.clearProperty("Rotation.LookaheadSession")
             window.clearProperty("Rotation.LookaheadBusy")
+            window.clearProperty("Rotation.QueueShuffled")
         return
     _LOOKAHEAD_STOPPED_AT = 0.0
-    playlist = xbmc.PlayList(xbmc.PLAYLIST_MUSIC)
-    try:
-        position = playlist.getposition()
-    except AttributeError:
-        position = 0
-    # At most one future item is exposed to the player. Unverified URLs can
-    # therefore never form a rapid skip chain, regardless of the active skin.
-    if playlist.size() - max(0, position) > 1:
-        return
+    # The shuffle button changed: the plugin re-orders the held-back queue
+    # straight away, even though a song is already queued ahead.
+    queue_shuffled = window.getProperty("Rotation.QueueShuffled")
+    reorder = bool(queue_shuffled) and (queue_shuffled == "1") != _player_shuffled()
+    if not reorder:
+        # Give rapid track changes time to settle before requesting another stream.
+        try:
+            if player.getTime() < 2:
+                return
+        except (RuntimeError, AttributeError):
+            return
+        playlist = xbmc.PlayList(xbmc.PLAYLIST_MUSIC)
+        try:
+            position = playlist.getposition()
+        except AttributeError:
+            position = 0
+        # At most one future item is exposed to the player. Unverified URLs can
+        # therefore never form a rapid skip chain, regardless of the active skin.
+        if playlist.size() - max(0, position) > 1:
+            return
     try:
         unavailable_until = float(window.getProperty(
             "Rotation.MusicMP3UnavailableUntil") or 0)
@@ -64,6 +93,8 @@ def _maintain_playback_lookahead():
     # workers against the same queue and provider.
     if busy_since and time.time() - busy_since < 120:
         return
+    if reorder:
+        _log("Player shuffle changed - re-ordering Rotation's queue")
     window.setProperty("Rotation.LookaheadBusy", str(time.time()))
     xbmc.executebuiltin(
         "RunPlugin(plugin://plugin.audio.rotation/playlists/lookahead?session=%s)" %
@@ -181,6 +212,12 @@ def _log(message, level=xbmc.LOGINFO):
 
 def _run_service():
     monitor = xbmc.Monitor()
+    # Don't resume paused downloads during Kodi's start-up. Starting the clock
+    # here means the first check (every 30 s) happens one minute in. Starting
+    # or retrying a download, or opening Downloads, still starts it at once.
+    DOWNLOAD_RESUME_DELAY = 60
+    last_download_check = time.time() - 30 + DOWNLOAD_RESUME_DELAY
+    last_cache_cleanup = 0
     refresh_only = "refresh-only" in sys.argv[1:]
     window = xbmcgui.Window(10000)
     worker_key = "Rotation.DirectoryRefreshWorker.1.0.18"
@@ -202,7 +239,22 @@ def _run_service():
                 window.setProperty(worker_key, token)
             _refresh_pending_directory()
             if not refresh_only:
+                if time.time() - last_cache_cleanup >= 86400:
+                    try:
+                        removed = prune_cache_files(xbmcvfs.translatePath(ADDON.getAddonInfo("profile")))
+                        if removed:
+                            _log("Removed %d old disposable cache files" % removed)
+                    except Exception as exc:
+                        _log("Cache housekeeping deferred: %s" % exc, xbmc.LOGWARNING)
+                    last_cache_cleanup = time.time()
+                if time.time() - last_download_check >= 30:
+                    start_download_worker(ADDON)
+                    last_download_check = time.time()
                 _maintain_playback_lookahead()
+                try:
+                    stream_slots.watch_playback()
+                except Exception as exc:
+                    _log("Playback watch skipped: %s" % exc, xbmc.LOGDEBUG)
             if monitor.waitForAbort(1):
                 break
     finally:

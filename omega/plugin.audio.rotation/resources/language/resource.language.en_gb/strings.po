@@ -238,3 +238,152 @@ msgstr ""
 msgctxt "#30073"
 msgid "Match tracks and artwork against your Kodi music library. Turn this off to use Rotation only as a streaming service."
 msgstr ""
+
+msgctxt "#30200"
+msgid "Appearance"
+msgstr ""
+
+msgctxt "#30201"
+msgid "Icon Style"
+msgstr ""
+
+msgctxt "#30202"
+msgid "Rotation — Default"
+msgstr ""
+
+msgctxt "#30203"
+msgid "Simple White"
+msgstr ""
+
+msgctxt "#30204"
+msgid "Choose the themed default icons or transparent white Phosphor Regular icons."
+msgstr ""
+
+msgctxt "#30205"
+msgid "Fallback Images"
+msgstr ""
+
+msgctxt "#30206"
+msgid "Fallback Fanart"
+msgstr ""
+
+msgctxt "#30207"
+msgid "Restore Default Fanart"
+msgstr ""
+
+msgctxt "#30208"
+msgid "Fallback Artist Image"
+msgstr ""
+
+msgctxt "#30209"
+msgid "Restore Default Artist Image"
+msgstr ""
+
+msgctxt "#30210"
+msgid "Fallback Album Image"
+msgstr ""
+
+msgctxt "#30211"
+msgid "Restore Default Album Image"
+msgstr ""
+
+msgctxt "#30212"
+msgid "Choose a JPG or PNG image. A copy is kept in this add-on’s userdata folder through updates and cache cleanup. Used only when actual artwork is unavailable; menu backgrounds keep the Rotation theme."
+msgstr ""
+
+msgctxt "#30300"
+msgid "Downloads"
+msgstr ""
+
+msgctxt "#30301"
+msgid "Download Folder"
+msgstr ""
+
+msgctxt "#30302"
+msgid "Choose a writable local or network folder. Downloaded music is stored here, separate from the add-on’s cache."
+msgstr ""
+
+msgctxt "#30303"
+msgid "Playlist Organization"
+msgstr ""
+
+msgctxt "#30304"
+msgid "Choose how playlist downloads are organized and tagged. Playlist Compilation groups songs under the playlist name with Various Artists as the album artist, while preserving each song’s actual artist. Original Albums organizes songs under their original artists and albums. This setting does not affect album or individual track downloads."
+msgstr ""
+
+msgctxt "#30305"
+msgid "Playlist Compilation — Various Artists"
+msgstr ""
+
+msgctxt "#30306"
+msgid "Original Albums"
+msgstr ""
+
+msgctxt "#30307"
+msgid "Scan Library After Download"
+msgstr ""
+
+msgctxt "#30308"
+msgid "Scan only the downloaded album or playlist folders after a batch finishes. Canceled downloads do not trigger a scan. Leave this off to keep downloads outside your music library. Files placed in an already scanned source may still be added by a later library scan."
+msgstr ""
+
+msgctxt "#30309"
+msgid "Ask About Options Each Download"
+msgstr ""
+
+msgctxt "#30310"
+msgid "Show your download folder and organization options before each download, with the option to change them for that download only. Turn this off to use your saved settings automatically. A download confirmation still appears."
+msgstr ""
+
+msgctxt "#30311"
+msgid "Add Downloaded Playlists to My Playlists"
+msgstr ""
+
+msgctxt "#30312"
+msgid "Automatically save completed playlist downloads to My Playlists in their original order, including existing library songs and downloaded files. Unavailable songs are omitted. Albums, individual songs, and canceled downloads are not added automatically. Retries update the same saved playlist."
+msgstr ""
+
+msgctxt "#30313"
+msgid "Direct Downloads"
+msgstr ""
+
+msgctxt "#30314"
+msgid "Get MusicMP3.ru files through track, album, and playlist context menus. Playback streaming settings are separate."
+msgstr ""
+
+msgctxt "#30315"
+msgid "Simultaneous Downloads"
+msgstr ""
+
+msgctxt "#30316"
+msgid "MusicMP3.ru allows two connections at a time, shared by downloading and streaming. Streaming always comes first: while a MusicMP3.ru song is playing, downloads drop to one at a time and pause for a moment each time the next song is prepared. Paused tracks resume where they stopped. Playing music from your Kodi library uses no connection and never slows downloads. Changes apply right away."
+msgstr ""
+
+msgctxt "#30317"
+msgid "1"
+msgstr ""
+
+msgctxt "#30318"
+msgid "2"
+msgstr ""
+
+
+msgctxt "#30320"
+msgid "Download Notifications"
+msgstr ""
+
+msgctxt "#30321"
+msgid "Choose continuous progress, brief milestones at 25%, 50%, and 75%, or only a completion summary. Downloads screens always show continuous progress while work is active. Progress hides in the full-screen player."
+msgstr ""
+
+msgctxt "#30322"
+msgid "Continuous Progress"
+msgstr ""
+
+msgctxt "#30323"
+msgid "Milestones"
+msgstr ""
+
+msgctxt "#30324"
+msgid "When Finished"
+msgstr ""

@@ -45,13 +45,33 @@ import requests
 import xbmc
 import xbmcgui
 
-from resources.lib.library import track_identity_key
+from resources.lib.library import track_identity_key, art_artist_name, norm_artist
 from resources.lib.provider_health import ProviderError, ProviderHealth
 
 DEEZER_API = "https://api.deezer.com"
 LASTFM_API = "https://ws.audioscrobbler.com/2.0/"
 
 USER_AGENT = "Kodi/Rotation (plugin.audio.rotation)"
+
+
+def primary_top_artists(rows, limit=50):
+    """Group explicit collaboration credits under the first credited artist."""
+    grouped = {}
+    for row in rows or []:
+        name = art_artist_name(row.get("name", ""))
+        key = norm_artist(name)
+        if not key:
+            continue
+        solo = name == row.get("name", "")
+        if key not in grouped:
+            grouped[key] = dict(row, name=name, id="", picture=row.get("picture", "") if solo else "", playcount=0)
+        target = grouped[key]
+        target["playcount"] += int(row.get("playcount") or 0)
+        if solo:
+            target["name"] = name
+            target["picture"] = row.get("picture", "")
+            target["id"] = row.get("id", "")
+    return sorted(grouped.values(), key=lambda row: row["playcount"], reverse=True)[:limit]
 
 
 def _dedupe_tracks(entries, limit=None):
@@ -268,6 +288,9 @@ class DeezerProvider(object):
             entries.append({
                 "artist":   artist,
                 "title":    title,
+                "download_title": row.get("title") or title,
+                "track_number": row.get("track_position"),
+                "disc_number": row.get("disk_number"),
                 "album":    album_obj.get("title", ""),
                 "album_id": album_obj.get("id"),
                 "artist_id": artist_obj.get("id"),
@@ -448,7 +471,10 @@ class DeezerProvider(object):
         album = self._fetch("/album/%s" % album_id)
         if album:
             album_artist = (album.get("artist") or {}).get("name", "")
-            for entry in entries:
+            for number, entry in enumerate(entries, 1):
+                entry["track_number"] = entry.get("track_number") or number
+                entry["year"] = str(album.get("release_date") or "")[:4]
+                entry["genre"] = ", ".join(row.get("name", "") for row in (album.get("genres") or {}).get("data", []))
                 entry["album"] = album.get("title", "")
                 entry["album_artist"] = album_artist
                 entry["cover"] = entry["cover"] or album.get("cover_big", "")
@@ -769,7 +795,8 @@ class LastFmProvider(object):
                     picture = image["#text"]
             if "2a96cbd8b46e442fc41c2b86b821562f" in picture.lower():
                 picture = ""
-            artists.append({"id": "", "name": row["name"], "picture": picture})
+            artists.append({"id": "", "name": row["name"], "picture": picture,
+                            "playcount": int(row.get("playcount") or 0)})
         return artists
 
     def chart_artists(self, limit=50):
@@ -793,9 +820,11 @@ class LastFmProvider(object):
         return _dedupe_tracks(self._tracks(rows), limit=limit)
 
     def user_top_artists(self, username, period="3month", limit=50):
+        # Fetch extra rows so collaboration duplicates do not shrink the list.
         data = self._call("user.gettopartists", user=username,
-                          period=period, limit=limit)
-        return self._artists((data or {}).get("topartists", {}).get("artist", []))
+                          period=period, limit=min(1000, max(100, limit * 3)))
+        return primary_top_artists(
+            self._artists((data or {}).get("topartists", {}).get("artist", [])), limit)
 
     def similar_tracks(self, artist, title, limit=20):
         data = self._call("track.getsimilar", artist=artist, track=title,
@@ -825,6 +854,15 @@ class LastFmProvider(object):
         if not data:
             return []
         return self._tracks((data.get("tracks") or {}).get("track", []))
+
+    def artist_info(self, artist):
+        """Biography for the exact requested artist, with cached API results."""
+        payload = self._call("artist.getInfo", artist=artist, autocorrect=0)
+        info = (payload or {}).get("artist") or {}
+        # Do not turn an information request into a different artist's bio.
+        if str(info.get("name") or "").strip().casefold() != str(artist).strip().casefold():
+            return {}
+        return info
 
     def artist_top(self, artist, limit=50):
         data = self._call("artist.gettoptracks", artist=artist, limit=limit)

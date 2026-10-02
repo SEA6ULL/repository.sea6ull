@@ -87,6 +87,26 @@ class PageCache(BaseModel):
 # Main API class
 # --------------------------------------------------------------------------- #
 
+_RANGE_LOGGED = set()
+_HEAD_REFUSED = []
+
+
+def _log_range_answer(response, context):
+    """Log, once per kind of request, how the file server answered.
+
+    For a partial-file request, 206 means it was honoured and 200 means the
+    whole file was sent (MusicMP3.ru does the latter). For a HEAD check, any
+    2xx/4xx answer shows HEAD works and costs no audio transfer.
+    """
+    if context in _RANGE_LOGGED:
+        return
+    _RANGE_LOGGED.add(context)
+    xbmc.log("[rotation] MusicMP3.ru answered the %s with HTTP %d; "
+             "Content-Range=%r Content-Length=%r" % (
+                 context, response.status_code, response.headers.get("Content-Range"),
+                 response.headers.get("Content-Length")), xbmc.LOGINFO)
+
+
 class musicMp3:
     def __init__(self, cache_dir, timeout=15, cache_hours=6):
         if not os.path.exists(cache_dir):
@@ -580,41 +600,44 @@ class musicMp3:
         )
 
     def stream_available(self, kodi_url):
-        """Verify the CDN accepts Kodi's cookie-free request before handoff.
+        """Check the file server will serve this stream, without downloading it.
 
-        A search result can be valid while the generated listen URL returns a
-        transient HTTP 503. Kodi 21 treats that queued decoder failure as an
-        immediate skip and can open two busy dialogs at once. Read only the
-        first small response chunk, using the same headers Kodi will send.
+        MusicMP3.ru ignores requests for part of a file: asking for the first
+        4 KB starts the whole song (HTTP 200 with the full length), spending
+        one of its two connections on a check. A HEAD request asks the same
+        question without any audio being sent (confirmed working: it answers
+        200, 404 and 503 like a normal request). If the server ever refuses
+        HEAD, fall back to reading a few bytes.
+
+        Sets last_error to "HTTP 503"/"HTTP 429" (busy) or a network error;
+        a missing file (404) returns False with last_error empty.
         """
         raw_url = (kodi_url or "").split("|", 1)[0]
         if not raw_url:
             return False
         self.last_error = ""
+        headers = {"User-Agent": self.user_agent, "Referer": self.base_url}
+        if not _HEAD_REFUSED:
+            try:
+                response = requests.head(raw_url, headers=headers,
+                                         timeout=self.timeout, allow_redirects=True)
+                _log_range_answer(response, "HEAD check")
+                if response.status_code in (405, 501):
+                    _HEAD_REFUSED.append(True)       # use the old check from now on
+                else:
+                    return self._judge_stream_answer(response)
+            except requests.exceptions.RequestException as exc:
+                self.last_error = str(exc)
+                xbmc.log("[rotation] MusicMP3.ru stream check failed: %s" % exc,
+                         xbmc.LOGWARNING)
+                return False
         response = None
         try:
-            response = requests.get(
-                raw_url,
-                headers={
-                    "User-Agent": self.user_agent,
-                    "Referer": self.base_url,
-                    "Range": "bytes=0-4095",
-                },
-                timeout=self.timeout,
-                stream=True,
-                allow_redirects=True,
-            )
-            if response.status_code not in (200, 206):
-                xbmc.log("[rotation] MusicMP3.ru stream preflight returned HTTP %d" %
-                         response.status_code, xbmc.LOGWARNING)
-                # A missing individual file can be skipped, but throttling or
-                # a server-side failure means checking another fifty tracks
-                # will only hammer the same unhealthy CDN.
-                if response.status_code == 429 or response.status_code >= 500:
-                    self.last_error = "HTTP %d" % response.status_code
-                return False
-            content_type = (response.headers.get("Content-Type") or "").lower()
-            if content_type.startswith("text/") or "html" in content_type:
+            response = requests.get(raw_url, headers=dict(headers, Range="bytes=0-4095"),
+                                    timeout=self.timeout, stream=True,
+                                    allow_redirects=True)
+            _log_range_answer(response, "stream check")
+            if not self._judge_stream_answer(response):
                 return False
             return bool(next(response.iter_content(512), b""))
         except requests.exceptions.RequestException as exc:
@@ -625,6 +648,18 @@ class musicMp3:
         finally:
             if response is not None:
                 response.close()
+
+    def _judge_stream_answer(self, response):
+        if response.status_code not in (200, 206):
+            xbmc.log("[rotation] MusicMP3.ru stream check returned HTTP %d" %
+                     response.status_code, xbmc.LOGWARNING)
+            # A missing file can be skipped; throttling or a server failure
+            # means checking more tracks would only hammer the same server.
+            if response.status_code == 429 or response.status_code >= 500:
+                self.last_error = "HTTP %d" % response.status_code
+            return False
+        content_type = (response.headers.get("Content-Type") or "").lower()
+        return not (content_type.startswith("text/") or "html" in content_type)
 
     # ----------------------------------------------------------------------- #
     # Favorites

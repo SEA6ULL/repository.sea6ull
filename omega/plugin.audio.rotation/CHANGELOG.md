@@ -1,148 +1,75 @@
-## 1.0.24 — 2026-09-30
+## 1.0.61
+- UPCOMING
+- More refinement to download system. 2 connection limit is a balancing act for smooth streaming while downloading.
+- Option to only download in the background while not streaming music. Using Local Library or Video Add-ons never interupts downloading.
+
+- DOWNLOADS
+- Add Downloads under My Music and direct download context actions.
+- Add Settings → Downloads: destination, playlist organization, optional library scan, per-download options prompt, and playlist saving/export, with explanatory helper text. Defaults use Various Artists compilation tagging, no automatic scan, and no options prompt.
+- Write artist/title/album/album-artist tags and cover artwork; compilation downloads retain each song’s performer while using the playlist name and Various Artists. Album and individual track downloads preserve original album organization.
+- Share MusicMP3.ru's two-connection limit between streaming and downloads. Kodi playing a MusicMP3.ru song counts as one connection; downloads use what's left. Streaming always comes first: while a stream plays, downloads drop to one transfer and pause briefly whenever the next song is checked. Playing from the Kodi library doesn't affect downloads.
+- Downloads pause instead of failing. A paused track keeps its partial file and resumes from the same byte. "Server busy" (HTTP 503/429) means wait and retry with growing delays; a track is only given up after about 15 minutes of busy answers. The download progress shows "Paused while streaming" or "Waiting for a free connection".
+- Add Download Notifications: Continuous Progress, Milestones, and When Finished (default). Downloads screens override the preference with continuous progress; full-screen players hide progress.
+- Limit library scans to actual downloaded album/compilation folders, skip automatic scans after cancellation, and add a manual Scan Downloaded Folders context action.
+- Add Export Playlist to Downloads, using Kodi’s folder picker and an ordered M3U8 of accessible files. Confirm unavailable omissions and protect existing export files.
+- Wait one minute after Kodi starts before resuming a paused download, so it doesn't add to start-up load. Starting or retrying a download, or opening Downloads, still resumes it straight away.
+- Find a Match… on any track that isn't in your Kodi library (album and playlist pages, and failed tracks in Downloads). Shows the closest MusicMP3.ru recordings with album, length and the difference from the expected length; each can be previewed before choosing. Also offers Search with Different Words… and Not on MusicMP3.ru.
+
+- ARTWORK
+- Optimize art caching and standardize across windows as much as possible.
+- Ask fanart.tv's voted album covers first when a key is set; Deezer/iTunes/Cover Art Archive fill gaps. Deezer grid covers are shown immediately and upgraded once in the background.
+- Use TheAudioDB clearlogos as an unvoted fallback.
+- Ask fanart.tv before TheAudioDB and skip TheAudioDB when fanart.tv already supplied portrait, background and logo.
+- Add Refresh Artwork to artist and album context menus. Kodi library art is untouched and still takes priority.
+- One artwork order everywhere. Kodi library → resolved online (fanart.tv highest-voted first) → provider tile.
+- Fix missing fanart and logos for artists with accented names when another service spells them without the accent.
+- Singles & EPs on an artist's albums page use the album fallback image (or your custom one from Appearance) instead of the albums icon, the artist's clearlogo, and "Singles & EPs" as the album title in the info line.
+
+- PLAYER
+- Playback order follows the player's shuffle button, as in Kodi's music library.
+- While a playlist or album page is open, a streamed track 1 is found and verified in the background, so Play starts almost immediately. The link is re-checked before use and expires after three minutes.
+- Remove the symbol prefixes (▶ 🔀 ★ ✕ ↑ ↓ ⇈ ⇊ ↕ ✎ ⌂) from context-menu labels so Rotation's menus match Kodi's own.
+- A song Kodi stops early (skip, preview, Stop) is now counted as holding a MusicMP3.ru connection for about 70 seconds, not for the rest of the song. Measured in a real session: still busy 50–59 s after the stop, free again by 67–68 s.
+
+- ARTIST MATCHING
+- Use Kodi's MusicBrainz artist IDs when present and cache every resolved MBID.
+- Match MusicBrainz artists by alias and without a leading "The", so renamed or differently credited artists (Kanye West, The Goo Goo Dolls) reach fanart.tv instead of being recorded as "no match".
+- Rank MusicBrainz artist matches over a bare duplicate.
+- If fanart.tv has no record at all for the chosen ID, try the next exact-name match (up to two). Never applies to MBIDs from your Kodi library.
+- Treat a MusicBrainz outage during an album lookup as transient rather than caching "no cover" for three days.
+- Group explicit featured/collaboration credits under the primary artist in Your Top Artists and For You album recommendations; combine play counts, avoid collaboration portraits/IDs, fetch extra candidates, and preserve genuine band names and full song credits.
+- Bundle Mutagen with its GPL license for consistent MP3 validation and ID3 tagging on supported Kodi devices.
+
+- MISC
+- Add My Albums and My Songs to My Music. Albums and songs could be saved but the lists had no menu entry.
+- Streaming no longer substitutes a live, remix, acoustic or similar version for the track that was asked for, and among good matches prefers the one closest in length.
+
+## 1.0.38
+- ARTWORK
+- Add Appearance → Icon Style with the existing Rotation pack as default and an optional transparent white pack.
+- Add JPG/PNG custom Fallback Art with individual Restore Default actions.
+
+- ARTIST
+- Add Hide Artist and a restore dialog.
+- Add Artist Biography for every artist. Suppress Information on non-library artist folders rather than error unavailable.
+- Standardize artist context menus as much as possible across windows.
+
+- MISC
+- Keep My Playlists limited to saved playlists for clean browsing and widgets; move creation, import, and format help to My Music.
+
+## 1.0.24
 - Expand the public README with the Rotation introduction, playlist-import formats and steps, and a downloadable TXT prompt for AI-created lists.
 - Include five screenshots, a README showcase, and a complete gallery for GitHub visitors.
-- Documentation-only release; playback, artwork loading, and navigation are unchanged.
-
-## 1.0.23 — 2026-09-30
-- Replace the custom scrollable import preview with Kodi's standard confirmation: song count plus Import and Cancel.
-- Remove the preview/editor message and custom dialog files; keep the editable imported-playlist name after confirmation.
-
-## 1.0.22 — 2026-09-30
-- Remove the omitted-line count from the import preview header.
-- Clarify that changes are made in the source file; the preview remains a read-only list with Import and Cancel buttons.
-
-## 1.0.21 — 2026-09-30
-- Prepopulate new playlists created from albums with Artist — Album, preferring album-artist metadata and keeping the existing editable duplicate-name behavior.
-- Preserve Kodi path history when navigating to addon/artist homes and returning from the playlist-cover editor.
-- Avoid committing empty successful directories during radio/album-search redirects; defer search/random artist transitions until their action dialogs close.
-- Cancel delayed redirects if the user has already backed out of their source screen.
-
-## 1.0.20 — 2026-09-30
-- Move playlist editing and missing-track reporting from standalone rows into the summary row's context menu; preserve song management menus.
-- Move Rotation Plus album download/completion and Most Wanted Albums actions into the summary context menu.
-- Keep empty playlists editable through their summary and expose Library Radio playback actions there too.
-- Allow explicit missing-track reporting from My Playlists.
-
-## 1.0.19 — 2026-09-30
-- Give playlist summary rows their selected playlist cover, including genre/popular playlists, followed playlists, albums, and My Playlists.
 - Use library-first artist thumbnails, fanart and clearlogos for Artist Radio, artist Top Tracks and Library Radio by Artist summaries.
-- Include the radio seed artist in the existing consolidated artwork pass when it is absent from the track list; no extra refreshes.
-
-## 1.0.18 — 2026-09-30
-- Use one shared progress-dialog owner across separate Kodi Python invocations.
-- Keep completed song counts visible throughout the artist artwork phase.
-- Remove partial availability redraws and combine scan/artwork completion into one final refresh.
-- Wait until progress-dialog teardown finishes before applying that refresh.
-
-## 1.0.17 — 2026-09-30
-- Identify open playlists with a directory-scoped marker for artwork progress and the single completion refresh.
-- Use the same canonical playlist location in browse, availability scan, and playback workers.
-- Allow final refreshes with harmless background skin dialogs; keep context-menu, modal, busy-dialog and player-window guards.
-- Log progress visibility and refresh hold reasons to diagnose remaining Kodi-specific behavior.
-
-## 1.0.16
-- Restore the artwork progress indicator across equivalent Kodi playlist URLs and re-entry during an active pass.
-- Apply one final artwork refresh through an independent script, including after an in-place addon update; no per-item refreshes.
-- Build imported playlist mosaic covers from learned metadata and cached album art; update the texture path as artwork becomes available.
-
-## 1.0.15 — 2026-09-30
-
-- Combine imported-song preview with explicit Import Playlist and Cancel buttons.
-- Move the final playlist artwork redraw to the independent service after the worker exits.
-
-## 1.0.14 — 2026-09-30
-
-- Fix missing xbmcvfs import when reading playlist files.
-
-## 1.0.13 — 2026-09-30
-
 - Import TXT or CSV playlists through Kodi's file browser from any accessible location.
-- Show import format help, including an AI prompt requesting a downloadable .txt file.
-- Review parsed songs and omitted lines; edit the suggested filename-based name before saving.
 - Save imports as independent, editable My Playlists. No import folder or AI account required.
-- Retry genuine streaming request failures once before a fixed 60-second cooldown.
-- Blocked attempts no longer extend cooldown; show one outage notice and countdowns for manual retries.
-- Continue with remaining library tracks during source failures and report accurately when none remain.
-- Preserve the completed-artwork single-refresh behavior from 1.0.12.
-
-# Rotation Changelog
-
-## 1.0.11
-
-- Added library-first artist clearlogos throughout artist and playlist views.
-- Added fanart.tv clearlogo discovery for artists outside the Kodi library.
-- Passed artist clearlogos to local and streamed playback items so compatible
-  skins can display them in the player.
-- Existing artwork cache entries are upgraded in place and checked for logos
-  without discarding their saved thumbnails or fanart.
-
-## 1.0.10
-
-- Carry cached library-first artist fanart from playlist rows into streaming playback.
-- Stop replacing available artist fanart with Rotation's fallback when a remote song starts.
-- Keep playback artwork lookup cache-only so starting a song remains immediate.
-
-## 1.0.9
-
-- Prepopulate snapshot names from the displayed source-playlist title.
-- Add dates to personalized snapshots and duplicate named-playlist snapshots.
-- Preserve the actual Deezer playlist title after opening a Popular Playlist.
-- Keep every suggested snapshot name editable before creation.
-
-## 1.0.8
-
-- Version every custom playlist-cover filename so Kodi immediately displays edits.
-- Make Shuffle Mosaic create a genuinely new mosaic on every selection.
-- Fix album-cover choices appearing to do nothing after another custom cover was cached.
-- Remove superseded managed custom-cover files after successful replacement.
-
-## 1.0.7
-
-- Delete managed local and shared playlist covers when their playlist is deleted.
-- Remove orphaned playlist covers while clearing the artwork cache.
-- Preserve Kodi's global thumbnail cache and unrelated artwork.
-
-## 1.0.6
-
-- Show cancellable native progress while locating playable playlist sources.
 - Fully hide and guard library-only actions when Kodi library use is disabled.
 - Add a visual My Playlists cover editor with automatic, shuffled, album, and custom-image covers.
-- Keep custom covers managed and rename-safe, including shared-library sync storage.
 - Use clean one-, two-, and three-panel automatic covers without repeated artwork.
-
-## 1.0.5
-
-- Retry MusicMP3.ru searches with accent-folded artist and track names.
-- Add a strictly validated title-only fallback when combined searches return no match.
-- Resolve known albums through MusicMP3.ru once and reuse their canonical track listing.
-- Keep the existing strict artist/title thresholds to prevent incorrect playback matches.
-
-## 1.0.4
-
-- Recognize MusicMP3.ru HTTP 429 and 5xx stream responses as temporary provider outages.
-- Pause playlist lookahead during a provider outage instead of repeatedly testing every remaining track.
-- Preserve the interrupted track and untested playlist queue, then resume automatically after cooldown.
-
-## 1.0.3
-
-- Treat an empty Kodi music library as a valid cached state instead of repeatedly rebuilding it.
 - Add an optional streaming-only mode that disables Kodi music-library queries and hides library-only sections.
-- Pre-buffer two verified tracks so Kodi exposes Next immediately when another playable song exists.
-- Prevent overlapping playback lookahead workers and pause streaming checks when the provider is unavailable.
-- Clarify that a personal fanart.tv API key is optional and improves artwork coverage.
-
-## 1.0.2
-
 - Added an offline Changelog viewer under Maintenance.
-
-## 1.0.1
-
-- Renamed Favorite Playlists to Followed Playlists.
 - Added clear read/write permission guidance for cross-device synchronization.
-- Added Kodi music-source selection when more than one source is configured.
 - Added a clear notification when Rotation cannot write to the shared source.
-- Improved automatic artwork refreshes on Your Top Artists and other artist listings.
-- Fixed completed artist-artwork batches remaining permanently marked as active.
 
 ## 1.0.0
 
