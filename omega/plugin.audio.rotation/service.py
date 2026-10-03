@@ -53,6 +53,8 @@ def _maintain_playback_lookahead():
             window.clearProperty("Rotation.LookaheadSession")
             window.clearProperty("Rotation.LookaheadBusy")
             window.clearProperty("Rotation.QueueShuffled")
+            window.clearProperty("Rotation.QueueHasStreams")
+            window.clearProperty("Rotation.LookaheadRetryAt")
         return
     _LOOKAHEAD_STOPPED_AT = 0.0
     # The shuffle button changed: the plugin re-orders the held-back queue
@@ -93,12 +95,30 @@ def _maintain_playback_lookahead():
     # workers against the same queue and provider.
     if busy_since and time.time() - busy_since < 120:
         return
+    # A deferred next-song check (a download held the other connection) is
+    # retried every 15 s, and immediately - allowed to pause the download -
+    # once the current song has 20 s or less to go.
+    urgent = False
+    try:
+        retry_at = float(window.getProperty("Rotation.LookaheadRetryAt") or 0)
+    except (TypeError, ValueError):
+        retry_at = 0
+    if retry_at:
+        try:
+            left = player.getTotalTime() - player.getTime()
+        except (RuntimeError, AttributeError):
+            left = 999
+        urgent = 0 < left <= 20
+        if not urgent and time.time() < retry_at:
+            return
     if reorder:
         _log("Player shuffle changed - re-ordering Rotation's queue")
+    if urgent:
+        _log("Current song nearly over - checking the next song now, pausing a download if needed")
     window.setProperty("Rotation.LookaheadBusy", str(time.time()))
     xbmc.executebuiltin(
-        "RunPlugin(plugin://plugin.audio.rotation/playlists/lookahead?session=%s)" %
-        session)
+        "RunPlugin(plugin://plugin.audio.rotation/playlists/lookahead?session=%s%s)" %
+        (session, "&urgent=1" if urgent else ""))
 
 
 def _plugin_route(value):

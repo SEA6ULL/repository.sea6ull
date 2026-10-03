@@ -1,8 +1,23 @@
-## 1.0.61
-- UPCOMING
-- More refinement to download system. 2 connection limit is a balancing act for smooth streaming while downloading.
-- Option to only download in the background while not streaming music. Using Local Library or Video Add-ons never interupts downloading.
+## 1.0.67
+- DOWNLOADS
+- New setting, While Streaming from MusicMP3.ru: Keep Downloading (default) or Wait Until Streaming Stops. "Streaming" means a Rotation session with MusicMP3.ru songs, including a mixed playlist while one of its library songs plays. Library-only playback, videos and other add-ons never affect downloads.
+- Keep Downloading: one track keeps downloading while you stream. The routine check of the next song no longer pauses it: if the site is busy, the check is retried every 15 s (your current song finishes transferring before it finishes playing, which frees its connection), and only with 20 s of the song left may it pause the download so the next song is ready in time.
+- Wait Until Streaming Stops: no new track starts while streaming; a track already downloading is allowed to finish, and the download resumes by itself afterwards ("Waiting · streaming" in the progress line).
+- With "Wait Until Streaming Stops", downloads now keep waiting for a while after streaming stops, in case you're only picking something else to play: new setting Resume Downloads After Streaming Stops (Immediately, 1, 2 or 5 minutes; default 2 minutes), shown only with that option. Starting a video or music from your Kodi library ends the wait at once. Pausing a song and the moments between songs never count as stopping. The progress line counts down ("Waiting · resuming in 1:35").
+- A paused track restarts from zero (the site can't resume), so a track estimated to finish within 15 s is never paused, and when one of two transfers must give way, the one furthest along keeps going.
+- Download page progress heading reads "Updating Information" instead of "Updating Artwork", since the background pass now also fetches album details, release dates and biographies.
 
+- INFORMATION
+- Albums show their release date in the fields Kodi's own library widgets use for the info line.
+- The description area shows an album facts line. Toggled on by user with user selected information.
+- The album page header shows the album's "about" text from Last.fm (when a Last.fm API key is set) or TheAudioDB (when enabled), cached per album; otherwise the facts line.
+- Artist biographies, in the description field show for artists (Artist_Description) if the skin supports it. From the Kodi library when it has one, otherwise Last.fm (needs a Last.fm API key) or TheAudioDB.
+
+- MISC
+- Downloads: Find a Match… is offered on every track that isn't downloaded, including ones never attempted, which are now labelled "Not attempted yet" (or "Waiting" while the download runs) instead of showing the whole download's status.
+- Remove the remaining symbols from menu labels ("↕ Reorder…", the Stereo Upmix toggle) and from the "Saved to…" notice and "Done Reordering" entry.
+
+## 1.0.61
 - DOWNLOADS
 - Add Downloads under My Music and direct download context actions.
 - Add Settings → Downloads: destination, playlist organization, optional library scan, per-download options prompt, and playlist saving/export, with explanatory helper text. Defaults use Various Artists compilation tagging, no automatic scan, and no options prompt.

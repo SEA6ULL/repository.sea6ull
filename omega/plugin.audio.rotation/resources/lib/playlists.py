@@ -500,6 +500,36 @@ class DeezerProvider(object):
         } for row in (payload or {}).get("data", [])
             if isinstance(row, dict) and row.get("id") and row.get("title")]
 
+    def album_details(self, album_id, cached_only=False):
+        """Label, genres, length, fans, explicit flag and release date.
+
+        One Deezer request per album, cached like other Deezer data. With
+        cached_only nothing is fetched, so directory builds stay instant;
+        missing details are filled in by the page's background pass.
+        Returns {} when unknown.
+        """
+        if not album_id:
+            return {}
+        key = "deezer:album-details:v1:%s" % album_id
+        try:
+            data = (self.cache.get_stale(key) if cached_only else
+                    self._fetch("/album/%s" % album_id, cache_key=key))
+        except Exception:
+            data = None
+        if not isinstance(data, dict) or not data.get("id"):
+            return {}
+        return {
+            "label": data.get("label") or "",
+            "genres": [row.get("name", "") for row in
+                       (data.get("genres") or {}).get("data", []) if row.get("name")],
+            "duration": int(data.get("duration") or 0),
+            "fans": int(data.get("fans") or 0),
+            "explicit": bool(data.get("explicit_lyrics")),
+            "release_date": data.get("release_date") or "",
+            "track_count": int(data.get("nb_tracks") or 0),
+            "record_type": (data.get("record_type") or "").lower(),
+        }
+
     def artist_albums(self, artist_id, limit=100):
         """Album links for a Deezer artist favorite."""
         payload = self._fetch("/artist/%s/albums?limit=%d" % (artist_id, limit))

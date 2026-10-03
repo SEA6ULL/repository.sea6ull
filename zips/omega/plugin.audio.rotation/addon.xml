@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<addon id="plugin.audio.rotation" name="Rotation" version="1.0.61" provider-name="SEA6ULL / GPT">
+<addon id="plugin.audio.rotation" name="Rotation" version="1.0.67" provider-name="SEA6ULL / GPT">
     <requires>
         <import addon="xbmc.python" version="3.0.0"/>
         <import addon="script.module.beautifulsoup4"/>

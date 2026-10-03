@@ -77,6 +77,30 @@ class StreamURL:
 
 
 _LAST_SETTING = [2]
+_LAST_WAIT_MODE = [False]
+
+
+_LAST_RESUME_DELAY = [120]
+
+
+def _resume_delay():
+    """Seconds to keep waiting after streaming stops (setting, read live)."""
+    try:
+        value = xbmcaddon.Addon('plugin.audio.rotation').getSetting('download_resume_delay')
+        _LAST_RESUME_DELAY[0] = int(value) if value.isdigit() else 120
+    except Exception:
+        pass
+    return _LAST_RESUME_DELAY[0]
+
+
+def _wait_while_streaming():
+    """The "While streaming from MusicMP3.ru" setting, read live."""
+    try:
+        _LAST_WAIT_MODE[0] = (xbmcaddon.Addon('plugin.audio.rotation')
+                              .getSetting('download_while_streaming') == 'wait')
+    except Exception:
+        pass
+    return _LAST_WAIT_MODE[0]
 
 
 def _download_setting():
@@ -182,7 +206,10 @@ def download_one(api, match, entry, job, number, store, cover, match_seconds, ac
             return receipt
         if canceled():
             raise InterruptedError('Canceled')
+        progress_now = {'received': 0, 'expected': 0}
+
         def update(received, expected):
+            progress_now.update(received=received, expected=expected)
             activity[number] = (entry.get('title', ''),
                                 min(.99, received / expected) if expected else 0)
         started = time.monotonic()
@@ -191,8 +218,10 @@ def download_one(api, match, entry, job, number, store, cover, match_seconds, ac
         try:
             info = transfer_audio(
                 api, match, entry, temporary, canceled, update,
-                should_pause=lambda: stream_slots.download_must_yield(token, setting),
-                heartbeat=lambda: stream_slots.heartbeat_download(token))
+                should_pause=lambda: stream_slots.download_must_yield(
+                    token, setting, _wait_while_streaming(), _resume_delay()),
+                heartbeat=lambda: stream_slots.heartbeat_download(
+                    token, progress_now['received'], progress_now['expected']))
         finally:
             stream_slots.release_download(token)
         timings['transfer'] = round(time.monotonic() - started, 2)
@@ -312,11 +341,19 @@ def run(addon):
                     canceled = monitor.abortRequested() or store.canceled(job['id'])
                     if canceled:
                         cursor = len(todo)
-                    allowance = stream_slots.download_allowance(_download_setting())
-                    if allowance != limited_logged:
-                        limited_logged = allowance
+                    waiting_mode = _wait_while_streaming()
+                    resume_delay = _resume_delay() if waiting_mode else 0
+                    allowance, keep = stream_slots.download_limits(
+                        _download_setting(), waiting_mode, resume_delay)
+                    held_for_streaming = waiting_mode and allowance == 0 and keep > 0
+                    grace = stream_slots.grace_left(resume_delay) if held_for_streaming else 0
+                    if (allowance, held_for_streaming, grace > 0) != limited_logged:
+                        limited_logged = (allowance, held_for_streaming, grace > 0)
                         xbmc.log('[rotation.downloads] Transfers allowed now: %d%s' % (
-                            allowance, ' (streaming has priority)' if allowance < _download_setting() else ''),
+                            allowance,
+                            ' (streaming stopped; resuming in %ds)' % grace if grace > 0 else
+                            ' (waiting until streaming stops)' if held_for_streaming else
+                            ' (streaming has priority)' if allowance < _download_setting() else ''),
                             xbmc.LOGINFO)
                     while (not canceled and cursor < len(todo) and len(active) < allowance
                            and time.time() >= not_before.get(todo[cursor][0], 0)):
@@ -406,7 +443,9 @@ def run(addon):
                         # or a busy track is waiting out its delay.
                         progress.update(min(99, int(len(job['results']) * 100 / total)),
                             message=' · '.join(v[0] for v in list(activity.values())) or
-                            'Paused · %s' % job['label'])
+                            (('Waiting · resuming in %d:%02d' % (int(grace) // 60, int(grace) % 60))
+                             if grace > 0 else
+                             'Waiting · streaming' if held_for_streaming else 'Paused · %s' % job['label']))
                         if monitor.waitForAbort(.5):
                             break
             if monitor.abortRequested():

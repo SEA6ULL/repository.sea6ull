@@ -1101,8 +1101,10 @@ def _artist_thumbs(names, queue_missing=True, refresh_path=None):
             logo = provider.artist_logo_cached(name)
         except Exception:
             continue
-        if cached is None or logo is None:
+        if cached is None or logo is None or _bio_missing(name):
             pending.append(name)
+            if cached:
+                thumbs[name] = cached
         elif cached:
             thumbs[name] = cached
         else:
@@ -1139,7 +1141,7 @@ def _queue_artist_backgrounds(names, path):
                                provider.artist_background_cached(name) is not None)
             logo_done = (bool(library_artist_logo(name)) or
                          provider.artist_logo_cached(name) is not None)
-            if not background_done or not logo_done:
+            if not background_done or not logo_done or _bio_missing(name):
                 pending.append(name)
         except Exception:
             continue
@@ -1199,12 +1201,14 @@ def _spawn_artist_worker(names, path):
                 return
 
             def _one(name):
+                found = False
                 try:
-                    return bool(provider.artist_art(name).get("thumb"))
+                    found = bool(provider.artist_art(name).get("thumb"))
                 except Exception as exc:
                     xbmc.log("[rotation] Artist art failed for %s: %s"
                              % (name, exc), xbmc.LOGWARNING)
-                    return False
+                # Biographies ride along so the listing still refreshes once.
+                return _fetch_artist_bio(name) or found
 
             with concurrent.futures.ThreadPoolExecutor(
                 max_workers=min(8, max(1, len(names)))
@@ -1497,9 +1501,9 @@ def _show_playlist_progress(path, folder):
                     scan = ""
                 was_scanning = was_scanning or bool(scan)
                 if art and (scan or last_scan[2]) and not scan_done:
-                    heading = "Updating Artwork and Song Availability"
+                    heading = "Updating Information and Song Availability"
                 elif art:
-                    heading = "Finishing Artwork Update" if (was_scanning or scan_done) else "Updating Artwork"
+                    heading = "Finishing Information Update" if (was_scanning or scan_done) else "Updating Information"
                 else:
                     heading = "Checking Song Availability"
                 try:
@@ -1555,7 +1559,7 @@ _ALBUM_PASS_RETRY = 30 * 60
 
 
 def _playlist_backgrounds(artists, path, folder="", refresh=True, background=True,
-                          album_pairs=None):
+                          album_pairs=None, album_ids=None):
     """Fill missing album covers and artist art without delaying browsing.
 
     Everything a listing needs - covers first, then artist thumbs, fanart and
@@ -1598,12 +1602,14 @@ def _playlist_backgrounds(artists, path, folder="", refresh=True, background=Tru
                              provider.artist_thumb_cached(artist) is None)
             logo_missing = (not library_artist_logo(artist) and
                             provider.artist_logo_cached(artist) is None)
-            if background_missing or thumb_missing or logo_missing:
+            if background_missing or thumb_missing or logo_missing or _bio_missing(artist):
                 pending.append(artist)
         except Exception as exc:
             xbmc.log("[rotation] Playlist artwork cache check failed for %r: %s"
                      % (artist, exc), xbmc.LOGWARNING)
-    if not pending and not pairs:
+    detail_ids = [aid for aid in dict.fromkeys(str(a) for a in (album_ids or ()) if a)
+                  if now - _ALBUM_PASS_TRIED.get(("details", aid), 0) >= _ALBUM_PASS_RETRY]
+    if not pending and not pairs and not detail_ids:
         return
 
     with _PLAYLIST_ART_LOCK:
@@ -1625,7 +1631,9 @@ def _playlist_backgrounds(artists, path, folder="", refresh=True, background=Tru
         window.clearProperty(done_key)
         for pair in pairs:
             _ALBUM_PASS_TRIED[pair] = now
-    total = len(pairs) + len(pending)
+        for aid in detail_ids:
+            _ALBUM_PASS_TRIED[("details", aid)] = now
+    total = len(pairs) + len(pending) + len(detail_ids)
     window.setProperty(art_key, "0/%d" % total)
 
     def _refresh():
@@ -1659,7 +1667,29 @@ def _playlist_backgrounds(artists, path, folder="", refresh=True, background=Tru
             if pairs:
                 xbmc.log("[rotation] Listing album covers: %d of %d improved"
                          % (covers, len(pairs)), xbmc.LOGINFO)
-            for checked, artist in enumerate(pending, len(pairs) + 1):
+            if detail_ids:
+                # Release date, label, genres and length for the description
+                # area: one cached Deezer request per album.
+                deezer = _make_playlists(quiet=True).deezer
+                found = 0
+                for checked, aid in enumerate(detail_ids, len(pairs) + 1):
+                    if monitor.abortRequested():
+                        break
+                    try:
+                        if deezer.album_details(aid):
+                            found += 1
+                            changed += 1
+                    except Exception as exc:
+                        xbmc.log("[rotation] Album details failed for %s: %s" % (aid, exc),
+                                 xbmc.LOGINFO)
+                    window.setProperty(art_key, "%d/%d" % (checked, total))
+                    window.setProperty(running_key, str(time.time()))
+                    # Stay well inside Deezer's limit (~50 requests / 5 s).
+                    if monitor.waitForAbort(0.15):
+                        break
+                xbmc.log("[rotation] Album details: %d of %d fetched" % (found, len(detail_ids)),
+                         xbmc.LOGINFO)
+            for checked, artist in enumerate(pending, len(pairs) + len(detail_ids) + 1):
                 if monitor.abortRequested():
                     break
                 try:
@@ -1671,6 +1701,8 @@ def _playlist_backgrounds(artists, path, folder="", refresh=True, background=Tru
                 except Exception as exc:
                     xbmc.log("[rotation] Playlist background failed for %r: %s"
                              % (artist, exc), xbmc.LOGWARNING)
+                if _fetch_artist_bio(artist):
+                    changed += 1
                 window.setProperty(art_key, "%d/%d" % (checked, total))
                 window.setProperty(running_key, str(time.time()))
             completed = not monitor.abortRequested()
@@ -1740,7 +1772,7 @@ def _get_link():
 
 
 def _set_music_tag(li, title="", artist="", album="", year="", genre="",
-                   duration=0, tracknumber=0, description=""):
+                   duration=0, tracknumber=0, description="", release_date=""):
     """Populate a ListItem MusicInfoTag using the Kodi 19+ API.
 
     setAlbumArtist() is called alongside setArtist() whenever an artist is
@@ -1765,7 +1797,156 @@ def _set_music_tag(li, title="", artist="", album="", year="", genre="",
         try:        tag.setDuration(int(float(duration)))
         except (ValueError, TypeError): pass
     if tracknumber: tag.setTrack(tracknumber)
-    if description: tag.setComment(description)
+    if release_date:
+        # The info line under an album in Kodi's own library widgets.
+        if not year:
+            try:        tag.setYear(int(str(release_date)[:4]))
+            except (ValueError, TypeError): pass
+        if hasattr(tag, "setReleaseDate"):           # Kodi 20+
+            try:        tag.setReleaseDate(str(release_date)[:10])
+            except Exception: pass
+    if description:
+        # Skins show either the comment or the album description in the
+        # description area; fill both, as Kodi's library does for albums.
+        tag.setComment(description)
+        li.setProperty("Album_Description", description)
+
+
+_INFO_SOURCE = []
+
+
+def _album_info_source():
+    if not _INFO_SOURCE:
+        from resources.lib.album_info import AlbumInfo
+        audiodb = ""
+        if addon.getSetting("artwork_theaudiodb") == "true":
+            audiodb = addon.getSetting("theaudiodb_apikey").strip() or "123"
+        _INFO_SOURCE.append(AlbumInfo(USER_DATA_DIR, lastfm_key=addon.getSetting("lastfm_apikey"),
+                                      audiodb_key=audiodb))
+    return _INFO_SOURCE[0]
+
+
+def _artist_bio(name):
+    """Cached biography for an artist's primary name ("" if none or off)."""
+    name = art_artist_name(name or "")
+    if not name or _is_various(name) or not _info_options()["artist"]:
+        return ""
+    try:
+        return _album_info_source().artist_cached(name) or ""
+    except Exception:
+        return ""
+
+
+def _bio_missing(name):
+    """True when a biography should be looked up for this artist."""
+    name = art_artist_name(name or "")
+    if not name or _is_various(name) or not _info_options()["artist"]:
+        return False
+    try:
+        return _album_info_source().artist_cached(name) is None
+    except Exception:
+        return False
+
+
+def _fetch_artist_bio(name):
+    """Look up a missing biography; True when new text arrived."""
+    if not _bio_missing(name):
+        return False
+    try:
+        return bool(_album_info_source().artist_bio(art_artist_name(name)))
+    except Exception as exc:
+        xbmc.log("[rotation] Artist biography failed for %r: %s" % (name, exc), xbmc.LOGINFO)
+        return False
+
+
+def _set_artist_description(li, name):
+    """Fill the field skins (e.g. Arctic Vibe) show as an artist's description."""
+    text = _artist_bio(name)
+    if text:
+        li.setProperty("Artist_Description", text)
+
+
+_INFO_ITEMS = ("tracks", "length", "label", "genres", "type", "explicit",
+               "reason", "fans", "description", "artist")
+
+
+def _info_options():
+    """Which album information to show (Settings > Appearance > Album
+    Information). The release date is always shown."""
+    if addon.getSetting("album_info_enabled") == "false":
+        return dict.fromkeys(_INFO_ITEMS, False)
+    return {item: addon.getSetting("album_info_" + item) != "false" for item in _INFO_ITEMS}
+
+
+def _details_wanted(options):
+    """True when any shown item needs the extra Deezer album lookup."""
+    return any(options[item] for item in ("length", "label", "genres", "explicit", "fans"))
+
+
+def _short_count(number):
+    number = int(number or 0)
+    if number >= 1000000:
+        return ("%.1fM" % (number / 1000000.0)).replace(".0M", "M")
+    if number >= 1000:
+        return ("%.1fK" % (number / 1000.0)).replace(".0K", "K")
+    return str(number)
+
+
+def _album_facts(album, details=None, reason="", options=None):
+    """Description-area text for an album in a list (no network).
+
+    "12 tracks · 47 min · Columbia Records · Pop, R&B"
+    "EP · Explicit · Deezer Album of the Week"
+    "1.2M fans on Deezer"
+    """
+    details = details or {}
+    show = options or _info_options()
+    first = []
+    tracks = details.get("track_count") or album.get("track_count")
+    if tracks and show["tracks"]:
+        first.append("%d track%s" % (int(tracks), "" if int(tracks) == 1 else "s"))
+    if details.get("duration") and show["length"]:
+        first.append("%d min" % max(1, round(details["duration"] / 60.0)))
+    if details.get("label") and show["label"]:
+        first.append(details["label"])
+    if details.get("genres") and show["genres"]:
+        first.append(", ".join(details["genres"][:2]))
+    second = []
+    kind = (details.get("record_type") or album.get("record_type") or "").lower()
+    if show["type"]:
+        second += {"ep": ["EP"], "single": ["Single"], "compile": ["Compilation"]}.get(kind, [])
+    if details.get("explicit") and show["explicit"]:
+        second.append("Explicit")
+    if reason and show["reason"]:
+        second.append(reason)
+    lines = [" · ".join(first), " · ".join(second)]
+    if details.get("fans") and show["fans"]:
+        lines.append("%s fans on Deezer" % _short_count(details["fans"]))
+    return "[CR]".join(line for line in lines if line)
+
+
+def _album_list_info(album, reason="", deezer=None, options=None):
+    """Tags for an album row from cached data only.
+
+    Returns (tag keyword arguments, needs_details). Missing details are
+    fetched by the page's background pass and appear after its refresh.
+    """
+    details = {}
+    if album.get("id"):
+        try:
+            deezer = deezer or _make_playlists(quiet=True).deezer
+            details = deezer.album_details(album["id"], cached_only=True)
+        except Exception:
+            details = {}
+    show = options or _info_options()
+    release = details.get("release_date") or album.get("release_date") or ""
+    tags = {"release_date": release,
+            "genre": ", ".join(details.get("genres", [])[:2]) if show["genres"] else "",
+            "description": _album_facts(album, details, reason, show)}
+    # Look the album up only when something shown needs it - or when the
+    # list didn't come with a release date, which is always shown.
+    needed = _details_wanted(show) or not release
+    return tags, bool(album.get("id")) and not details and needed
 
 
 def _kind_label(kind):
@@ -2431,11 +2612,20 @@ def download_tracks(key):
         else:
             title = "%s — %s" % (entry.get("artist", ""), entry.get("title", ""))
             li = xbmcgui.ListItem("[COLOR gray]%s[/COLOR]" % title)
-            li.setLabel2(results.get(number, {}).get("error") or results.get(number, {}).get("status") or job["state"])
+            result = results.get(number)
+            if result:
+                li.setLabel2(result.get("error") or result.get("status") or job["state"])
+            else:
+                # Never reached (e.g. the download stopped early); don't show
+                # the whole download's status as if this track had failed.
+                li.setLabel2("Waiting" if job["state"] in ("queued", "running")
+                             else "Not attempted yet")
             li.setArt(art if job.get("album") or job.get("single") else
                       _download_entry_art(entry, entry.get("cover") or art.get("thumb")))
             li.setProperty("IsPlayable", "false")
-            if results.get(number, {}).get("status") == "failed":
+            # Any track that isn't downloaded can be matched by hand - failed
+            # or never attempted alike - before retrying the download.
+            if not result or result.get("status") != "downloaded":
                 li.addContextMenuItems(_match_context(entry, job=key, position=number),
                                        replaceItems=False)
             xbmcplugin.addDirectoryItem(plugin.handle, report, li, False)
@@ -3397,6 +3587,7 @@ def _render_artists(rows, heading="Artists"):
         # to resolve library extras such as clearlogo and clearart.
         _set_music_tag(li, title=name, artist=name)
         _set_artist_library_identity(li, name)
+        _set_artist_description(li, name)
         li.addContextMenuItems(
             _artist_context(name, url, thumb,
                             norm_artist(name) in library_names),
@@ -3674,12 +3865,17 @@ def artists_page():
         li.setArt(_art(art.get("thumb"), fanart, FALLBACK_ARTIST,
                        art.get("clearlogo")))
         _set_music_tag(li, title=label, artist=name)
+        _set_artist_description(li, name)
         li.addContextMenuItems(_artist_navigation_context(), replaceItems=False)
         xbmcplugin.addDirectoryItem(plugin.handle, url, li, is_folder)
     # A single space prevents skins from falling back to the add-on name
     # while keeping the artist page free of a redundant category heading.
     xbmcplugin.setPluginCategory(plugin.handle, " ")
     xbmcplugin.endOfDirectory(plugin.handle, cacheToDisc=False)
+    if _bio_missing(name):
+        # Fetch the biography (with any missing art) and refresh this page
+        # once when it arrives.
+        _spawn_artist_worker([art_artist_name(name)], _current_plugin_path())
 
 
 def _artist_local_songs(name):
@@ -4167,7 +4363,7 @@ def favorites(kind):
 
     if kind in ("playlist", "radio"):
         directory_items = []
-        reorder_item = (u"\u2195  Reorder {0}\u2026".format(_kind_label(kind)),
+        reorder_item = (u"Reorder {0}\u2026".format(_kind_label(kind)),
                         _favorite_reorder_action(kind))
         radio_library_art = {}
         radio_portraits = {}
@@ -4248,7 +4444,7 @@ def favorites(kind):
         }
         _favorite_portraits = _artist_thumbs([
             name for name in favorite_names
-            if not _favorite_library_art[name].get("thumb")
+            if not _favorite_library_art[name].get("thumb") or _bio_missing(name)
         ])
     else:
         # Cache-only: the old bulk pass held this screen for up to the full
@@ -4266,6 +4462,8 @@ def favorites(kind):
         _favorite_library_art = {}
 
     directory_items = []
+    favorite_details = []
+    favorite_deezer = _make_playlists(quiet=True).deezer if kind == "album" else None
     for f in items:
         _favorite_label = (
             "{0} — {1}".format(f["artist"], f["label"])
@@ -4298,9 +4496,19 @@ def favorites(kind):
                            _favorite_library_art.get(_favorite_name, {}).get("clearlogo")
                            if kind == "artist" else "") or
                        _cached_logo(_favorite_name)))
-        _set_music_tag(li, title=f["label"], artist=f["artist"], album=f["album"])
+        _favorite_info = {}
+        if kind == "album":
+            # Saved albums link to their album page, which carries the Deezer id.
+            album_id = (re.search(r"/deezer_album/(\d+)", f.get("url", "")) or [None, ""])[1]
+            _favorite_info, needs_details = _album_list_info(
+                {"id": album_id}, "", favorite_deezer)
+            if needs_details:
+                favorite_details.append(album_id)
+        _set_music_tag(li, title=f["label"], artist=f["artist"], album=f["album"],
+                       **_favorite_info)
         if kind == "artist":
             _set_artist_library_identity(li, _favorite_name)
+            _set_artist_description(li, _favorite_name)
             # Use the same menu and one Kodi menu write on every artist list.
             has_library = any(norm_artist(row["name"]) == norm_artist(_favorite_name)
                               for row in favorite_library_groups)
@@ -4312,7 +4520,7 @@ def favorites(kind):
             li.addContextMenuItems([
                 ("Remove from {0}".format(_kind_label(kind)),
                  "RunPlugin({0})".format(remove_url)),
-                (u"\u2195  Reorder {0}\u2026".format(_kind_label(kind)),
+                (u"Reorder {0}\u2026".format(_kind_label(kind)),
                  _favorite_reorder_action(kind)),
             ])
         if kind == "song":
@@ -4345,7 +4553,7 @@ def favorites(kind):
         path = _current_plugin_path()
         _playlist_backgrounds(
             [art_artist_name(_favorite_artist_name(f, kind)) for f in items],
-            path, path, album_pairs=_favorite_pending)
+            path, path, album_pairs=_favorite_pending, album_ids=favorite_details)
         _show_playlist_progress(path, path)
 
 
@@ -4360,7 +4568,7 @@ def favorite_add():
     api = _favorites()
     api.add_favorite(kind, url, label, thumb=thumb, artist=artist, album=album)
     xbmcgui.Dialog().notification(
-        plugin.name, u"\u2605  Saved to {0}: {1}".format(_kind_label(kind), label),
+        plugin.name, u"Saved to {0}: {1}".format(_kind_label(kind), label),
         xbmcgui.NOTIFICATION_INFO, 2500
     )
 
@@ -4396,7 +4604,7 @@ def favorite_reorder():
 
         labels = [_favorite_display_label(item, kind) for item in items]
         choice = xbmcgui.Dialog().select(
-            heading, [u"\u2713  Done Reordering"] + labels)
+            heading, [u"Done Reordering"] + labels)
         if choice <= 0:
             break
 
@@ -4544,11 +4752,11 @@ def _virt_label():
             '"params":{"setting":"audiooutput.stereoupmix"}}'
         )
         val = json.loads(raw).get("result", {}).get("value", None)
-        if val is True:  return u"\U0001f50a  Stereo Upmix: ON  [toggle off]"
-        if val is False: return u"\U0001f507  Stereo Upmix: OFF [toggle on]"
+        if val is True:  return u"Stereo Upmix: On (turn off)"
+        if val is False: return u"Stereo Upmix: Off (turn on)"
     except Exception:
         pass
-    return u"\U0001f50a  Toggle Stereo Upmix"
+    return u"Toggle Stereo Upmix"
 
 
 # --------------------------------------------------------------------------- #
@@ -5392,7 +5600,7 @@ def _playlist_display_cover(entry, cache, provider=None):
 
 
 def _start_playlist_artwork(entries, tracks, path, folder="", force_refresh=False,
-                            artist="", album_pair=None):
+                            artist="", album_pair=None, album_id="", detail_ids=None):
     """Run all artwork stages off the UI thread and publish one final redraw.
 
     album_pair=(artist, album) makes the page's own cover part of the same
@@ -5457,9 +5665,12 @@ def _start_playlist_artwork(entries, tracks, path, folder="", force_refresh=Fals
             if monitor.abortRequested():
                 return
             changed |= bool(_playlist_backgrounds(
-                names, path, folder, refresh=False, background=False))
+                names, path, folder, refresh=False, background=False,
+                album_ids=detail_ids))
             if album_pair and not monitor.abortRequested():
                 changed |= bool(_resolve_album_pair(*album_pair))
+            if album_id and album_pair and not monitor.abortRequested():
+                changed |= bool(_fetch_album_page_info(album_id, *album_pair))
             completed = not monitor.abortRequested()
         except Exception as exc:
             xbmc.log("[rotation] Playlist artwork pass failed: %s" % exc,
@@ -5485,6 +5696,33 @@ def _start_playlist_artwork(entries, tracks, path, folder="", force_refresh=Fals
     thread.daemon = True
     thread.start()
     return True
+
+
+def _fetch_album_page_info(album_id, artist, album):
+    """Album details and description for an album page header, when missing.
+
+    Runs inside the page's single background pass; True when anything new
+    arrived (the page then refreshes once, as for artwork).
+    """
+    changed = False
+    show = _info_options()
+    try:
+        deezer = _make_playlists(quiet=True).deezer
+        # The release date is always shown, so the details are always useful here.
+        if not deezer.album_details(album_id, cached_only=True) and deezer.album_details(album_id):
+            changed = True
+    except Exception as exc:
+        xbmc.log("[rotation] Album details failed for %s: %s" % (album_id, exc), xbmc.LOGINFO)
+    if not show["description"]:
+        return changed
+    try:
+        info = _album_info_source()
+        if info.cached(artist, album) is None and info.description(artist, album):
+            changed = True
+    except Exception as exc:
+        xbmc.log("[rotation] Album description failed for %r / %r: %s" % (artist, album, exc),
+                 xbmc.LOGINFO)
+    return changed
 
 
 def _resolve_album_pair(artist, album):
@@ -6582,7 +6820,106 @@ def _playlist_summary_art(kind, arg, entries):
                 clearlogo=_cached_logo(artist) if artist else "")
 
 
-def _add_playlist_summary(entries, tracks=None, availability_complete=False, artwork=None, context_menu=None):
+def _length_text(seconds):
+    minutes = int(round(seconds / 60.0))
+    if minutes >= 60:
+        return "%d h %d min" % (minutes // 60, minutes % 60)
+    return "%d min" % max(1, minutes)
+
+
+def _list_facts(entries, options):
+    """"50 tracks · 3 h 12 min · 38 artists" for a playlist-style page."""
+    parts = []
+    if options["tracks"] and entries:
+        parts.append("%d track%s" % (len(entries), "" if len(entries) == 1 else "s"))
+    total = sum(int(float(e.get("duration") or 0)) for e in entries)
+    if options["length"] and total:
+        parts.append(_length_text(total))
+    # Count lead artists, so "The Weeknd & Ariana Grande" doesn't add a second.
+    artists = {primary_artist(e.get("artist", "")) for e in entries if e.get("artist")}
+    if options["tracks"] and len(artists) > 1:
+        parts.append("%d artists" % len(artists))
+    return " · ".join(parts)
+
+
+def _track_album_date(entry, deezer):
+    """Release date of the album a track comes from, from cached details."""
+    if entry.get("release_date"):
+        return entry["release_date"]
+    try:
+        return (deezer.album_details(entry.get("album_id"), cached_only=True)
+                .get("release_date", ""))
+    except Exception:
+        return ""
+
+
+def _list_summary_info(kind, arg, entries, heading):
+    """Summary row details for pages that aren't a single album.
+
+    Artist pages (Top Tracks, artist radio) - and any page whose tracks are
+    all by one artist - carry that artist and their biography, which skins
+    show as the artist description. Every page gets a facts line; it fills
+    the description area when there's no biography to show.
+    """
+    show = _info_options()
+    info = {"title": heading or ""}
+    counts = {}
+    for entry in entries or ():
+        name = art_artist_name(entry.get("artist", ""))
+        if name and not _is_various(name):
+            counts[name] = counts.get(name, 0) + 1
+    lead = max(counts, key=lambda name: counts[name]) if counts else ""
+    single_artist = len(counts) == 1
+    if lead and (kind in ("artist_top", "radio") or single_artist):
+        info["artist"] = lead
+        info["artist_description"] = _artist_bio(lead)
+    if kind == "genre" and heading:
+        info["genre"] = heading
+    facts = _list_facts(entries or [], show)
+    if facts and not info.get("artist_description"):
+        info["description"] = facts
+    elif facts:
+        # Skins that read the comment still get the facts; the description
+        # field is left to the biography, which skins rank below it.
+        info["comment_only"] = facts
+    return info
+
+
+def _playlist_summary_info(kind, arg, entries, heading):
+    """Music details for the summary row at the top of a track list.
+
+    Album pages get the album, artist, release date, genre and - in the
+    description area - the "about this album" text, or the facts line when
+    no description is known (yet). Other pages get their title.
+    """
+    if kind != "deezer_album" or not entries:
+        return _list_summary_info(kind, arg, entries, heading)
+    first = entries[0]
+    album = first.get("album", "") or heading or ""
+    artist = first.get("album_artist") or first.get("artist", "")
+    details = {}
+    try:
+        details = _make_playlists(quiet=True).deezer.album_details(arg, cached_only=True)
+    except Exception:
+        pass
+    show = _info_options()
+    description = ""
+    if show["description"]:
+        try:
+            description = _album_info_source().cached(artist, album) or ""
+        except Exception:
+            pass
+    return {"title": album, "artist": artist, "album": album,
+            "year": first.get("year", ""),
+            "release_date": details.get("release_date", ""),
+            "genre": (", ".join(details.get("genres", [])[:2]) or first.get("genre", ""))
+                     if show["genres"] else "",
+            "description": description or _album_facts(
+                {"track_count": len(entries)}, details, "", show)}
+
+
+def _add_playlist_summary(entries, tracks=None, availability_complete=False, artwork=None,
+                          context_menu=None, info=None):
     """Add cross-skin target and playable totals above a track listing."""
     count = len(entries)
     label = "Target: %d song%s" % (count, "" if count == 1 else "s")
@@ -6608,6 +6945,17 @@ def _add_playlist_summary(entries, tracks=None, availability_complete=False, art
     summary = xbmcgui.ListItem(label)
     summary.setLabel2("Playlist information")
     summary.setArt(artwork or _art("", FALLBACK_FANART, ICON_SONGS))
+    if info:
+        # Without these the skin's info line went blank on this row: it had
+        # a label and artwork but no music details at all.
+        info = dict(info)
+        artist_text = info.pop("artist_description", "")
+        comment_only = info.pop("comment_only", "")
+        _set_music_tag(summary, **info)
+        if artist_text:
+            summary.setProperty("Artist_Description", artist_text)
+        if comment_only:
+            summary.getMusicInfoTag().setComment(comment_only)
     if context_menu:
         summary.addContextMenuItems(context_menu, replaceItems=False)
     summary.setProperty("IsPlayable", "false")
@@ -6720,9 +7068,25 @@ def _render_playlist(kind, arg, heading, entries=None, building=False):
                 "Add Missing Tracks to Library Report (%d)" % count,
                 "RunPlugin(%s)" % _playlist_report_missing_url(kind, arg, heading)))
 
+    summary_info = _playlist_summary_info(kind, arg, entries, heading)
     _add_playlist_summary(entries, tracks, availability_complete,
                           artwork=_playlist_summary_art(kind, arg, entries),
-                          context_menu=summary_context)
+                          context_menu=summary_context,
+                          info=summary_info)
+    # Every track on an album page shares the album's year, release date,
+    # genre and description (facts line or "about" text), so whatever the
+    # skin shows for the album stays in place while moving through its
+    # tracks. Without the description, skins that build the info line from
+    # it lost everything but the album title on track rows.
+    album_tags = ({key: summary_info.get(key, "")
+                   for key in ("year", "release_date", "genre", "description")}
+                  if kind == "deezer_album" else {})
+    # On every other page each track comes from its own album. Deezer's
+    # track lists leave out the release date, so take it from that album's
+    # cached details; albums not yet cached are fetched in the page's
+    # background pass and appear after its single refresh.
+    track_deezer = None if album_tags else _make_playlists(quiet=True).deezer
+    missing_dates = []
 
     if (show_unavailable and availability_complete and tracks and
             not playable_count and not _musicmp3_enabled()):
@@ -6800,6 +7164,17 @@ def _render_playlist(kind, arg, heading, entries=None, building=False):
             entry, song, cover, str(arg) if kind == "user" else "",
             int(entry.get("_user_position", position - 1))
             if kind == "user" else -1)
+        if album_tags:
+            _set_music_tag(li, **album_tags)
+        elif entry.get("album_id") and not (song or {}).get("year"):
+            dated = _track_album_date(entry, track_deezer)
+            if dated:
+                _set_music_tag(li, release_date=dated)
+            else:
+                missing_dates.append(str(entry["album_id"]))
+        # Skins that show an album's text prefer it; elsewhere (playlists,
+        # radio) the focused track's artist biography fills the space.
+        _set_artist_description(li, artist)
         match_context = _match_context(entry) if not song else []
         li.addContextMenuItems(context + user_context + album_context
                                + artist_context + match_context + radio_context,
@@ -6848,7 +7223,9 @@ def _render_playlist(kind, arg, heading, entries=None, building=False):
                           first.get("album", ""))
         _start_playlist_artwork(entries, tracks, listing_path, folder,
                                 artist=str(arg) if kind in ("radio", "artist_top") else "",
-                                album_pair=album_pair)
+                                album_pair=album_pair,
+                                album_id=str(arg) if kind == "deezer_album" else "",
+                                detail_ids=list(dict.fromkeys(missing_dates)))
         # In playlist order a streamed track 1 can't be swapped for a library
         # song, so get its stream ready while the tracklist is being read.
         _prewarm_first_stream(candidates)
@@ -7802,6 +8179,10 @@ def _render_deezer_album_choices(albums, category):
     show_marker = _show_not_in_library_labels()
     seen = set()
     pending_art = []
+    pending_details = []
+    deezer = _make_playlists(quiet=True).deezer
+    reason = {"Albums of the Week": "Deezer Album of the Week",
+              "New Albums for You": "New for You"}.get(category, "")
     hidden = _hidden_artists()
     for album in albums:
         if artist_key(album.get("artist")) in hidden:
@@ -7844,8 +8225,11 @@ def _render_deezer_album_choices(albums, category):
         li.setLabel2(" · ".join(details))
         li.setArt(_album_art_dict(artwork))
         li.setProperty("Rotation.Availability", availability)
+        info, needs_details = _album_list_info(album, reason, deezer)
+        if needs_details:
+            pending_details.append(aid)
         _set_music_tag(li, title=display_title, artist=artist,
-                       album=album["title"])
+                       album=album["title"], **info)
         actions = _playlist_play_context("deezer_album", aid, album["title"])
         actions += _direct_album_context(aid, album["title"])
         actions += _favorite_context(
@@ -7859,7 +8243,7 @@ def _render_deezer_album_choices(albums, category):
     path = _current_album_listing_path()
     _playlist_backgrounds([art_artist_name(a.get("artist", "")) for a in albums
                           if artist_key(a.get("artist")) not in hidden], path, path,
-                          album_pairs=pending_art)
+                          album_pairs=pending_art, album_ids=pending_details)
     _show_playlist_progress(path, path)
     xbmcplugin.endOfDirectory(plugin.handle, cacheToDisc=False)
 
@@ -7957,6 +8341,8 @@ def _render_artist_releases(artist_id, albums, artist_name, include_extras=False
     library_albums = _artist_album_library_map(artist_name)
     api = _favorites()
     pending_art = []
+    pending_details = []
+    deezer = _make_playlists(quiet=True).deezer
     for album in albums:
         aid = str(album["id"])
         url = plugin.url_for(playlists_deezer_album, aid)
@@ -7992,8 +8378,11 @@ def _render_artist_releases(artist_id, albums, artist_name, include_extras=False
             "deezer_album", aid, album.get("cover", ""), album_artist)
         li.setArt(_album_art_dict(artwork))
         li.setProperty("Rotation.Availability", "available" if count else "missing")
+        info, needs_details = _album_list_info(album, "", deezer)
+        if needs_details:
+            pending_details.append(aid)
         _set_music_tag(li, title=display_title, artist=album_artist,
-                       album=album["title"])
+                       album=album["title"], **info)
         li.addContextMenuItems(
             _playlist_play_context("deezer_album", aid, album["title"])
             + _direct_album_context(aid, album["title"])
@@ -8006,7 +8395,7 @@ def _render_artist_releases(artist_id, albums, artist_name, include_extras=False
     _set_view("albums")
     path = _current_plugin_path()
     _playlist_backgrounds([art_artist_name(artist_name)], path, path,
-                          album_pairs=pending_art)
+                          album_pairs=pending_art, album_ids=pending_details)
     _show_playlist_progress(path, path)
     xbmcplugin.endOfDirectory(plugin.handle, cacheToDisc=False)
 
@@ -8441,6 +8830,10 @@ def playlists_play():
     window = xbmcgui.Window(10000)
     window.setProperty("Rotation.LookaheadSession", session)
     window.setProperty("Rotation.QueueShuffled", "1" if shuffle else "0")
+    # Lets downloads tell a library-only session from one that will stream.
+    has_streams = (any(not row.get("song") for _, row in issued_rows) or
+                   any(not row.get("song") for row in remaining))
+    window.setProperty("Rotation.QueueHasStreams", "1" if has_streams else "0")
     window.clearProperty("Rotation.LookaheadBusy")
     playlist = xbmc.PlayList(xbmc.PLAYLIST_MUSIC)
     playlist.clear()
@@ -8966,6 +9359,26 @@ def _musicmp3_outage_notice(library_remaining=False, playable_remaining=False):
                                   xbmcgui.NOTIFICATION_WARNING, 5000)
 
 
+class DeferredCheck(Exception):
+    """The routine next-song check found the site busy while a download holds
+    the second connection. Try again later instead of pausing the download."""
+
+
+def _routine_check(api, url):
+    """Next-song check during playback that never pauses a download.
+
+    While your song is still being sent and a download holds the other
+    connection, the site answers "busy". Report that as DeferredCheck: the
+    current song finishes transferring before it finishes playing, which
+    frees its connection, and the service tries again then.
+    """
+    if api.stream_available(url):
+        return True
+    if api.last_error in ("HTTP 503", "HTTP 429"):
+        raise DeferredCheck(api.last_error)
+    return False
+
+
 def _checked_stream(api, url):
     """Stream check that respects the shared two-connection budget.
 
@@ -8997,7 +9410,7 @@ def _checked_stream(api, url):
         stream_slots.release_stream_slot(handoff=True)
 
 
-def _verified_musicmp3_track(entry):
+def _verified_musicmp3_track(entry, routine=False):
     """Retry a genuine network failure once, never retry a missing track."""
     if _musicmp3_cooldown_remaining():
         raise RuntimeError("Streaming source unavailable (cooldown)")
@@ -9010,7 +9423,9 @@ def _verified_musicmp3_track(entry):
         else:
             url = api.play_url(match["track_id"], match["rel"],
                                referer_url=match.get("album_url") or None)
-            if _checked_stream(api, url):
+            if (_routine_check(api, url)
+                    if routine and stream_slots.downloads_active()
+                    else _checked_stream(api, url)):
                 window = xbmcgui.Window(10000)
                 window.clearProperty("Rotation.MusicMP3UnavailableUntil")
                 window.clearProperty("Rotation.MusicMP3NoticeUntil")
@@ -9024,14 +9439,14 @@ def _verified_musicmp3_track(entry):
                  xbmc.LOGWARNING)
 
 
-def _resolve_musicmp3_stream(entry, session="", expected_file=""):
+def _resolve_musicmp3_stream(entry, session="", expected_file="", routine=False):
     """Return one verified direct stream URL without touching Kodi's player."""
     artist = entry.get("artist", "")
     title = entry.get("title", "")
     if not artist or not title:
         raise ValueError("Missing artist or title")
     window = xbmcgui.Window(10000)
-    api, match, url = _verified_musicmp3_track(entry)
+    api, match, url = _verified_musicmp3_track(entry, routine=routine)
     if expected_file and xbmc.Player().getPlayingFile() != expected_file:
         raise InterruptedError("Playback changed while resolving a stream")
     if session and expected_file and _read_playback_queue().get("session") != session:
@@ -9110,6 +9525,9 @@ def _apply_player_shuffle(state, playing_file):
 def playlists_lookahead():
     """Append the next verified item; called only by Rotation's service."""
     session = unquote(plugin.args.get("session", [""])[0])
+    # "urgent" = the current song is nearly over: the next one must be ready
+    # now, so a running download may be paused for the check.
+    urgent = plugin.args.get("urgent", ["0"])[0] == "1"
     window = xbmcgui.Window(10000)
     try:
         state = _read_playback_queue()
@@ -9135,7 +9553,9 @@ def playlists_lookahead():
                     url = song["file"]
                     li = _playlist_listitem(song, position)
                 else:
-                    url = _resolve_musicmp3_stream(entry, session=session, expected_file=playing_file)
+                    url = _resolve_musicmp3_stream(entry, session=session,
+                                                   expected_file=playing_file,
+                                                   routine=not urgent)
                     li = _resolved_remote_listitem(entry, url, position)
                 if _read_playback_queue().get("session") != session:
                     return
@@ -9144,6 +9564,16 @@ def playlists_lookahead():
                 xbmc.PlayList(xbmc.PLAYLIST_MUSIC).add(url, li)
                 _issue_row(state, url, row)
                 appended = True
+                window.clearProperty("Rotation.LookaheadRetryAt")
+            except DeferredCheck:
+                # Keep the download going; check again in 15 s, or right away
+                # once the current song is nearly over (the service decides).
+                remaining.insert(0, row)
+                window.setProperty("Rotation.LookaheadRetryAt", str(time.time() + 15))
+                xbmc.log("[rotation] Next-song check deferred so the download keeps "
+                         "its connection: %s / %s" % (entry.get("artist"), entry.get("title")),
+                         xbmc.LOGINFO)
+                break
             except InterruptedError:
                 remaining.insert(0, row)
                 break

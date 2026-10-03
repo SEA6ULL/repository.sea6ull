@@ -106,6 +106,81 @@
                     <control type="button" format="action"><close>true</close></control>
                 </setting>
             </group>
+            <group id="3" label="30329">
+                <setting id="album_info_enabled" type="boolean" label="30329" help="30330">
+                    <level>0</level><default>true</default><control type="toggle"/>
+                </setting>
+                <setting id="album_info_tracks" type="boolean" label="30331" help="30332" parent="album_info_enabled">
+                    <level>0</level><default>true</default>
+                    <dependencies>
+                        <dependency type="visible" setting="album_info_enabled" operator="is">true</dependency>
+                    </dependencies>
+                    <control type="toggle"/>
+                </setting>
+                <setting id="album_info_length" type="boolean" label="30333" help="30334" parent="album_info_enabled">
+                    <level>0</level><default>true</default>
+                    <dependencies>
+                        <dependency type="visible" setting="album_info_enabled" operator="is">true</dependency>
+                    </dependencies>
+                    <control type="toggle"/>
+                </setting>
+                <setting id="album_info_label" type="boolean" label="30335" help="30336" parent="album_info_enabled">
+                    <level>0</level><default>true</default>
+                    <dependencies>
+                        <dependency type="visible" setting="album_info_enabled" operator="is">true</dependency>
+                    </dependencies>
+                    <control type="toggle"/>
+                </setting>
+                <setting id="album_info_genres" type="boolean" label="30337" help="30338" parent="album_info_enabled">
+                    <level>0</level><default>true</default>
+                    <dependencies>
+                        <dependency type="visible" setting="album_info_enabled" operator="is">true</dependency>
+                    </dependencies>
+                    <control type="toggle"/>
+                </setting>
+                <setting id="album_info_type" type="boolean" label="30339" help="30340" parent="album_info_enabled">
+                    <level>0</level><default>true</default>
+                    <dependencies>
+                        <dependency type="visible" setting="album_info_enabled" operator="is">true</dependency>
+                    </dependencies>
+                    <control type="toggle"/>
+                </setting>
+                <setting id="album_info_explicit" type="boolean" label="30341" help="30342" parent="album_info_enabled">
+                    <level>0</level><default>true</default>
+                    <dependencies>
+                        <dependency type="visible" setting="album_info_enabled" operator="is">true</dependency>
+                    </dependencies>
+                    <control type="toggle"/>
+                </setting>
+                <setting id="album_info_reason" type="boolean" label="30343" help="30344" parent="album_info_enabled">
+                    <level>0</level><default>true</default>
+                    <dependencies>
+                        <dependency type="visible" setting="album_info_enabled" operator="is">true</dependency>
+                    </dependencies>
+                    <control type="toggle"/>
+                </setting>
+                <setting id="album_info_fans" type="boolean" label="30345" help="30346" parent="album_info_enabled">
+                    <level>0</level><default>true</default>
+                    <dependencies>
+                        <dependency type="visible" setting="album_info_enabled" operator="is">true</dependency>
+                    </dependencies>
+                    <control type="toggle"/>
+                </setting>
+                <setting id="album_info_description" type="boolean" label="30347" help="30348" parent="album_info_enabled">
+                    <level>0</level><default>true</default>
+                    <dependencies>
+                        <dependency type="visible" setting="album_info_enabled" operator="is">true</dependency>
+                    </dependencies>
+                    <control type="toggle"/>
+                </setting>
+                <setting id="album_info_artist" type="boolean" label="30349" help="30350" parent="album_info_enabled">
+                    <level>0</level><default>true</default>
+                    <dependencies>
+                        <dependency type="visible" setting="album_info_enabled" operator="is">true</dependency>
+                    </dependencies>
+                    <control type="toggle"/>
+                </setting>
+            </group>
         </category>
 
         <category id="artwork" label="30001">
@@ -227,6 +302,19 @@
                 <setting id="download_parallel" type="string" label="30315" help="30316">
                     <level>0</level><default>2</default>
                     <constraints><options><option label="30317">1</option><option label="30318">2</option></options></constraints>
+                    <control type="spinner" format="string"/>
+                </setting>
+                <setting id="download_while_streaming" type="string" label="30325" help="30326">
+                    <level>0</level><default>keep</default>
+                    <constraints><options><option label="30327">keep</option><option label="30328">wait</option></options></constraints>
+                    <control type="spinner" format="string"/>
+                </setting>
+                <setting id="download_resume_delay" type="string" label="30351" help="30352" parent="download_while_streaming">
+                    <level>0</level><default>120</default>
+                    <constraints><options><option label="30353">0</option><option label="30354">60</option><option label="30355">120</option><option label="30356">300</option></options></constraints>
+                    <dependencies>
+                        <dependency type="visible" setting="download_while_streaming" operator="is">wait</dependency>
+                    </dependencies>
                     <control type="spinner" format="string"/>
                 </setting>
                 <setting id="download_scan" type="boolean" label="30307" help="30308">

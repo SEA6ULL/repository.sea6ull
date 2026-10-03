@@ -163,6 +163,7 @@ def watch_playback():
     if FILE_HOST not in current:
         current = ""
     _enforce_preview_limit(player, current)
+    note_streaming()
     if watched.get("file") and watched["file"] != current:
         total, elapsed = watched.get("total", 0), watched.get("elapsed", 0)
         if total and total - elapsed > 5:
@@ -198,11 +199,77 @@ def demand_active():
         return False
 
 
+def streaming_session_active():
+    """True while Rotation is streaming from MusicMP3.ru - including a mixed
+    playlist while one of its library songs plays, because its next streamed
+    song will need a connection. Library-only playback, videos and other
+    add-ons don't count."""
+    window = _window()
+    return bool(kodi_streaming() or (
+        window.getProperty("Rotation.LookaheadSession") and
+        window.getProperty("Rotation.QueueHasStreams") == "1"))
+
+
 def download_allowance(setting):
     """How many download transfers may run right now (0, 1 or 2)."""
     allowance = (MAX_CONNECTIONS - kodi_streaming() - lingering_active()
                  - (1 if demand_active() else 0))
     return max(0, min(int(setting), allowance))
+
+
+_LAST_STREAMING = "Rotation.MusicMP3.LastStreamingAt"
+
+
+def note_streaming():
+    """Record that Rotation is streaming right now (called every second by
+    the service, and by the download worker)."""
+    if streaming_session_active():
+        _window().setProperty(_LAST_STREAMING, str(time.time()))
+
+
+def _moved_on():
+    """Playing something that needs no MusicMP3.ru connection - a video, or
+    music that isn't a Rotation stream - means the user isn't coming back to
+    streaming in a moment, so downloads needn't wait."""
+    try:
+        player = xbmc.Player()
+        if player.isPlayingVideo():
+            return True
+        return player.isPlayingAudio() and not streaming_session_active()
+    except Exception:
+        return False
+
+
+def grace_left(resume_delay):
+    """Seconds downloads should still wait after streaming stopped, or 0."""
+    if not resume_delay or streaming_session_active():
+        return 0
+    try:
+        last = float(_window().getProperty(_LAST_STREAMING) or 0)
+    except ValueError:
+        last = 0
+    if not last or _moved_on():
+        return 0
+    return max(0, last + resume_delay - time.time())
+
+
+def download_limits(setting, wait_while_streaming=False, resume_delay=0):
+    """(new transfers that may start, running transfers that may continue).
+
+    With "Wait until streaming stops", no new track starts during a
+    streaming session, but a track already downloading may finish while it
+    fits within the connection limit - stopping it would only throw away
+    what it has received.
+    """
+    allowance = download_allowance(setting)
+    if wait_while_streaming:
+        note_streaming()
+        # Also hold for a short while after streaming stops: stopping is
+        # often just a pause to pick something else, and a track started in
+        # that gap would be thrown away when playback resumes.
+        if streaming_session_active() or grace_left(resume_delay) > 0:
+            return 0, allowance
+    return allowance, allowance
 
 
 # --------------------------------------------------------------------------- #
@@ -216,11 +283,32 @@ def claim_download(token):
     _save_download_slots(slots)
 
 
-def heartbeat_download(token):
+def heartbeat_download(token, received=0, expected=0):
     slots = _download_slots()
     if token in slots:
         slots[token]["beat"] = time.time()
+        if expected:
+            slots[token]["received"] = received
+            slots[token]["expected"] = expected
         _save_download_slots(slots)
+
+
+PROTECT_SECONDS = 15
+
+
+def _seconds_left(info):
+    """Estimated seconds until a transfer finishes, or None if unknown."""
+    received, expected = info.get("received", 0), info.get("expected", 0)
+    elapsed = time.time() - info.get("start", time.time())
+    if not expected or not received or elapsed <= 0:
+        return None
+    rate = received / elapsed
+    return (expected - received) / rate if rate > 0 else None
+
+
+def _progress(info):
+    expected = info.get("expected", 0)
+    return info.get("received", 0) / float(expected) if expected else 0.0
 
 
 def release_download(token):
@@ -229,17 +317,22 @@ def release_download(token):
         _save_download_slots(slots)
 
 
-def download_must_yield(token, setting):
+def download_must_yield(token, setting, wait_while_streaming=False, resume_delay=0):
     """True when this transfer has to pause to free a connection.
 
-    The most recently started transfers give way first, so the one closest
-    to finishing keeps going.
+    A paused track restarts from zero (the site can't resume), so:
+    a transfer about to finish (under PROTECT_SECONDS left) never pauses,
+    and otherwise the one furthest along keeps going.
     """
     slots = _download_slots()
     if token not in slots:
         return False
-    order = sorted(slots, key=lambda key: slots[key].get("start", 0))
-    return order.index(token) >= download_allowance(setting)
+    left = _seconds_left(slots[token])
+    if left is not None and left <= PROTECT_SECONDS:
+        return False
+    order = sorted(slots, key=lambda key: _progress(slots[key]), reverse=True)
+    keep = download_limits(setting, wait_while_streaming, resume_delay)[1]
+    return order.index(token) >= keep
 
 
 # --------------------------------------------------------------------------- #

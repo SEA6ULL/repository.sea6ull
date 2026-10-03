@@ -356,7 +356,7 @@ msgid "Simultaneous Downloads"
 msgstr ""
 
 msgctxt "#30316"
-msgid "MusicMP3.ru allows two connections at a time, shared by downloading and streaming. Streaming always comes first: while a MusicMP3.ru song is playing, downloads drop to one at a time and pause for a moment each time the next song is prepared. Paused tracks resume where they stopped. Playing music from your Kodi library uses no connection and never slows downloads. Changes apply right away."
+msgid "MusicMP3.ru allows two connections at a time, shared by downloading and streaming. With nothing streaming, this many tracks download at once. While a MusicMP3.ru song plays, downloads drop to one at a time (see While Streaming). Playing music from your Kodi library, videos or other add-ons uses no connection and never slows downloads. Changes apply right away."
 msgstr ""
 
 msgctxt "#30317"
@@ -386,4 +386,132 @@ msgstr ""
 
 msgctxt "#30324"
 msgid "When Finished"
+msgstr ""
+
+msgctxt "#30325"
+msgid "While Streaming from MusicMP3.ru"
+msgstr ""
+
+msgctxt "#30326"
+msgid "MusicMP3.ru allows two connections at a time, shared by streaming and downloading. Keep Downloading downloads one track at a time while you stream; a track close to finishing is never interrupted. Wait Until Streaming Stops holds new downloads while Rotation streams from MusicMP3.ru, including mixed playlists, and resumes them automatically afterwards; a track already downloading is allowed to finish. Playing your Kodi library, videos or other add-ons never affects downloads."
+msgstr ""
+
+msgctxt "#30327"
+msgid "Keep Downloading"
+msgstr ""
+
+msgctxt "#30328"
+msgid "Wait Until Streaming Stops"
+msgstr ""
+
+msgctxt "#30329"
+msgid "Display Information"
+msgstr ""
+
+msgctxt "#30330"
+msgid "Show extra album information in the description area of album lists and album pages, for skins that display it. Turn this on to choose each item below."
+msgstr ""
+
+msgctxt "#30331"
+msgid "Track Count"
+msgstr ""
+
+msgctxt "#30332"
+msgid "Number of tracks, e.g. \"12 tracks\"."
+msgstr ""
+
+msgctxt "#30333"
+msgid "Album Length"
+msgstr ""
+
+msgctxt "#30334"
+msgid "Total running time, e.g. \"47 min\"."
+msgstr ""
+
+msgctxt "#30335"
+msgid "Record Label"
+msgstr ""
+
+msgctxt "#30336"
+msgid "The album's record label."
+msgstr ""
+
+msgctxt "#30337"
+msgid "Genres"
+msgstr ""
+
+msgctxt "#30338"
+msgid "Up to two genres, in the description and in the genre field skins show."
+msgstr ""
+
+msgctxt "#30339"
+msgid "Release Type"
+msgstr ""
+
+msgctxt "#30340"
+msgid "EP, Single or Compilation (nothing for a regular album)."
+msgstr ""
+
+msgctxt "#30341"
+msgid "Explicit"
+msgstr ""
+
+msgctxt "#30342"
+msgid "Marks albums with explicit lyrics."
+msgstr ""
+
+msgctxt "#30343"
+msgid "Why It's Listed"
+msgstr ""
+
+msgctxt "#30344"
+msgid "E.g. \"Deezer Album of the Week\" or \"New for You\"."
+msgstr ""
+
+msgctxt "#30345"
+msgid "Deezer Fans"
+msgstr ""
+
+msgctxt "#30346"
+msgid "How many Deezer users follow the album, e.g. \"1.2M fans on Deezer\"."
+msgstr ""
+
+msgctxt "#30347"
+msgid "Album Description"
+msgstr ""
+
+msgctxt "#30348"
+msgid "On album pages, the \"about this album\" text from Last.fm (needs a Last.fm API key) or TheAudioDB. Without one, album pages show the items above instead."
+msgstr ""
+
+msgctxt "#30349"
+msgid "Artist Description"
+msgstr ""
+
+msgctxt "#30350"
+msgid "The artist's biography on artist lists, artist pages and tracks in playlists, for skins that show it. From your Kodi library when it has one, otherwise Last.fm (needs a Last.fm API key) or TheAudioDB. On album pages the album description takes priority."
+msgstr ""
+
+msgctxt "#30351"
+msgid "Resume Downloads After Streaming Stops"
+msgstr ""
+
+msgctxt "#30352"
+msgid "How long downloads keep waiting after you stop streaming, in case you're only picking something else to play. Starting a video or music from your Kodi library ends the wait at once. Pausing a song, and the moments between songs in a playlist, never count as stopping."
+msgstr ""
+
+msgctxt "#30353"
+msgid "Immediately"
+msgstr ""
+
+msgctxt "#30354"
+msgid "After 1 Minute"
+msgstr ""
+
+msgctxt "#30355"
+msgid "After 2 Minutes"
+msgstr ""
+
+msgctxt "#30356"
+msgid "After 5 Minutes"
 msgstr ""
