@@ -1826,13 +1826,36 @@ def _album_info_source():
     return _INFO_SOURCE[0]
 
 
+DESCRIPTION_LIMIT = 700
+
+
+def _short_text(text, limit=DESCRIPTION_LIMIT):
+    """Trim a biography or album description for display.
+
+    Full texts run to 3,500 characters. Skins re-flow the description on
+    every focus change, which made scrolling an artist list visibly laggy
+    on low-power devices (NVIDIA Shield). Cut at the last sentence end
+    before the limit - about the length of Last.fm's own summaries. The
+    full text stays cached.
+    """
+    text = (text or "").strip()
+    if len(text) <= limit:
+        return text
+    cut = text[:limit]
+    end = max(cut.rfind(". "), cut.rfind("! "), cut.rfind("? "), cut.rfind(".\n"))
+    if end >= limit // 2:
+        return cut[:end + 1].rstrip()
+    space = cut.rfind(" ")
+    return (cut[:space] if space > 0 else cut).rstrip(" ,;:") + "…"
+
+
 def _artist_bio(name):
     """Cached biography for an artist's primary name ("" if none or off)."""
     name = art_artist_name(name or "")
     if not name or _is_various(name) or not _info_options()["artist"]:
         return ""
     try:
-        return _album_info_source().artist_cached(name) or ""
+        return _short_text(_album_info_source().artist_cached(name) or "")
     except Exception:
         return ""
 
@@ -6906,7 +6929,7 @@ def _playlist_summary_info(kind, arg, entries, heading):
     description = ""
     if show["description"]:
         try:
-            description = _album_info_source().cached(artist, album) or ""
+            description = _short_text(_album_info_source().cached(artist, album) or "")
         except Exception:
             pass
     return {"title": album, "artist": artist, "album": album,

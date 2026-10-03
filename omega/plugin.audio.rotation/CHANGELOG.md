@@ -1,3 +1,6 @@
+## 1.0.68
+- Artist biographies and album descriptions are shortened for display to about 700 characters, ending at a full sentence (roughly the length of Last.fm's own summaries). The full texts ran to 3,500 characters, and skins re-flow the description on every focus change, which made scrolling artist lists laggy on low-power devices.
+
 ## 1.0.67
 - DOWNLOADS
 - New setting, While Streaming from MusicMP3.ru: Keep Downloading (default) or Wait Until Streaming Stops. "Streaming" means a Rotation session with MusicMP3.ru songs, including a mixed playlist while one of its library songs plays. Library-only playback, videos and other add-ons never affect downloads.
