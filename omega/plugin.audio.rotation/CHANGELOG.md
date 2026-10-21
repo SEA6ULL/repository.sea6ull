@@ -1,3 +1,14 @@
+## 1.0.72
+- Now Playing: while a Rotation list is playing, Rotation's home screen starts with "Now Playing · <list name>".
+- Recent Radio & Playlists, at the top of My Music: the last 10 radio stations and playlists you played. Context menu: Play, Make a Fresh Mix (Artist Radio), Play a Fresh Mix (Library Radio) or Open Latest Version (charts and playlists), Save Snapshot to My Playlists, and Remove from Recent.
+- For You: "Recently Played" is renamed "Recently Played Tracks" (your Last.fm listening history), next to Your Top Tracks.
+- Player artwork now uses the same lookup as the pages (Kodi library album, then the saved online cover, then the provider cover; artist fanart and clearlogo from the primary artist), read when each song is queued shortly before it plays. Artwork downloaded after a station or playlist started now reaches the player instead of leaving later songs on the fallback image.
+- The song already playing is updated too: when new artwork arrives (each time the next song is queued, and when the page's background artwork pass finishes), its cover, fanart and clearlogo are replaced in place.
+- Fix Kodi crashing ("two concurrent busydialogs") when playing an album or playlist whose songs aren't on MusicMP3.ru. Selecting a track now plays the list from that track through Rotation's own queue, which checks songs before handing them to Kodi and skips unavailable ones quietly. In playlist order, earlier songs are set aside and return if shuffle is turned on.
+- Selecting the summary row now plays the whole list (Play All). Information rows ("Checking playable tracks…", "No playable tracks found" and others) no longer have an empty path that Kodi tried to play.
+- Songs found not to be on MusicMP3.ru are remembered for 30 minutes, so they're skipped at once instead of being searched for again. A match picked with Find a Match… takes priority.
+- Safety net where Kodi queues Rotation songs itself (widgets, My Songs): after three unavailable songs in a row, the remaining streaming songs are removed from the queue with a notice instead of being skipped one by one.
+
 ## 1.0.68
 - Artist biographies and album descriptions are shortened for display to about 700 characters, ending at a full sentence (roughly the length of Last.fm's own summaries). The full texts ran to 3,500 characters, and skins re-flow the description on every focus change, which made scrolling artist lists laggy on low-power devices.
 

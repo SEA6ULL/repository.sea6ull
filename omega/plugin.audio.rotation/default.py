@@ -2086,6 +2086,13 @@ def index():
         ("Discover",                plugin.url_for(playlists_root),             ICON_SEARCH),
         ("Maintenance",             plugin.url_for(maintenance),                ICON_MAINTENANCE),
     ]
+    playing = _now_playing_info()
+    if playing:
+        # Only while a Rotation list is playing: the way back to it, with the
+        # same artwork that list shows on its own page.
+        li = xbmcgui.ListItem("Now Playing · %s" % playing.get("label", "Rotation"))
+        li.setArt(_now_playing_art(playing))
+        xbmcplugin.addDirectoryItem(plugin.handle, plugin.url_for(now_playing), li, True)
     for label, url, icon in items:
         li = xbmcgui.ListItem(label)
         li.setArt({"fanart": FANART, "icon": icon})
@@ -2100,6 +2107,7 @@ def _lastfm_username():
 @plugin.route("/my_music")
 def my_music_root():
     items = [
+        ("Recent Radio & Playlists", plugin.url_for(recent_lists), ICON_RADIO),
         ("My Playlists", plugin.url_for(user_playlists_root), ICON_PLAYLISTS),
         ("Create Playlist", plugin.url_for(user_playlist_create_root), ICON_PLAYLISTS),
         # "Save to My Albums" / "Save to My Songs" had no way back to the list.
@@ -2135,7 +2143,7 @@ def for_you_root():
         ("Recommended Radio", "recommended", ICON_RADIO, True),
         ("Your Top Tracks", "top_tracks", ICON_TOP_SONGS, True),
         ("Your Top Artists", "top_artists", ICON_ARTISTS, True),
-        ("Recently Played", "recent", ICON_TOP_SONGS, True),
+        ("Recently Played Tracks", "recent", ICON_TOP_SONGS, True),
         ("Rediscover Favorites", "rediscover", ICON_FAVORITES, True),
         ("New Albums from Artists You Play", "new_albums", ICON_NEW_ALBUMS, True),
         ("Forgotten Favorites", "forgotten", ICON_SHUFFLE, True),
@@ -2365,7 +2373,7 @@ def for_you_browse(mode):
                                          "New Albums for You")
             return
         headings = {
-            "recommended": "Recommended Radio", "recent": "Recently Played",
+            "recommended": "Recommended Radio", "recent": "Recently Played Tracks",
             "rediscover": "Rediscover Favorites",
             "forgotten": "Forgotten Favorites", "top_tracks": "Your Top Tracks"}
         entries = _for_you_entries(mode)
@@ -2708,7 +2716,7 @@ def downloads_root():
         li = xbmcgui.ListItem("No downloads yet")
         li.setLabel2("Use a track, album, or playlist summary’s context menu to download")
         li.setArt({"thumb": ICON_SONGS, "icon": ICON_SONGS, "fanart": FANART})
-        xbmcplugin.addDirectoryItem(plugin.handle, "", li, False)
+        xbmcplugin.addDirectoryItem(plugin.handle, _info_row_url(), li, False)
     seen = set()
     for job in jobs:
         if job["id"] in seen:
@@ -3517,6 +3525,346 @@ def match_review():
         if job_id:
             # The retry action asks before downloading.
             xbmc.executebuiltin("RunPlugin(%s)" % plugin.url_for(download_retry, job_id))
+    xbmc.executebuiltin("Container.Refresh")
+
+
+# --------------------------------------------------------------------------- #
+# Recent Radio & Playlists, and Now Playing
+# --------------------------------------------------------------------------- #
+
+RECENT_FILE = os.path.join(USER_DATA_DIR, "recent_lists.json")
+RECENT_MAX = 10
+NOW_PLAYING_KEY = "Rotation.NowPlaying"
+_RECENT_TYPES = {
+    "radio": "Artist Radio", "library_radio": "Library Radio",
+    "artist_top": "Top Tracks", "top": "Chart", "country": "Chart",
+    "genre": "Genre", "editorial": "Playlist", "tag": "Tag Radio",
+    "user": "My Playlist", "for_you": "For You",
+}
+_RECENT_FIELDS = ("artist", "title", "album", "album_artist", "duration", "cover",
+                  "album_id", "artist_cover", "file", "thumb", "year", "genre")
+
+
+def _recent_load():
+    try:
+        with open(RECENT_FILE, "r", encoding="utf-8") as stream:
+            rows = json.load(stream)
+        return rows if isinstance(rows, list) else []
+    except (OSError, ValueError, TypeError):
+        return []
+
+
+def _recent_save(rows):
+    try:
+        os.makedirs(USER_DATA_DIR, exist_ok=True)
+        with open(RECENT_FILE + ".tmp", "w", encoding="utf-8") as stream:
+            json.dump(rows[:RECENT_MAX], stream, ensure_ascii=False)
+        os.replace(RECENT_FILE + ".tmp", RECENT_FILE)
+    except OSError as exc:
+        xbmc.log("[rotation] Could not save recent lists: %s" % exc, xbmc.LOGWARNING)
+
+
+def _recent_get(recent_id):
+    return next((row for row in _recent_load() if row.get("id") == recent_id), None)
+
+
+def _remember_recent(kind, arg, label, entries):
+    """Keep the exact list just started, newest first (radio and playlists;
+    albums are easy to find again and are left out). Returns its id."""
+    if kind == "recent":
+        rows = _recent_load()
+        for row in rows:
+            if row.get("id") == arg:
+                row["played"] = time.time()
+                rows.remove(row)
+                rows.insert(0, row)
+                _recent_save(rows)
+                return arg
+        return ""
+    if kind not in _RECENT_TYPES or not entries:
+        return ""
+    recent_id = hashlib.sha1(("%s|%s" % (kind, arg)).encode("utf-8")).hexdigest()[:12]
+    record = {"id": recent_id, "kind": kind, "arg": arg, "label": label or "",
+              "played": time.time(),
+              "entries": [{key: entry[key] for key in _RECENT_FIELDS if entry.get(key)}
+                          for entry in entries]}
+    rows = [row for row in _recent_load() if row.get("id") != recent_id]
+    _recent_save([record] + rows)
+    return recent_id
+
+
+def _ago(when):
+    seconds = max(0, time.time() - (when or 0))
+    if seconds < 3600:
+        return "%d min ago" % max(1, seconds // 60)
+    if seconds < 86400:
+        return "%d h ago" % (seconds // 3600)
+    days = int(seconds // 86400)
+    return "%d day%s ago" % (days, "" if days == 1 else "s")
+
+
+def _fresh_mix_action(row):
+    """(label, builtin) to start over from the original source, or None."""
+    kind, arg = row.get("kind"), row.get("arg")
+    if kind == "library_radio":
+        mode, _, value = str(arg).partition("|")
+        return ("Play a Fresh Mix", "RunPlugin(%s?mode=%s&value=%s&label=%s)" % (
+            plugin.url_for(library_radio_play), quote(mode, safe=""),
+            quote(value, safe=""), quote(row.get("label", ""), safe="")))
+    if kind == "radio":
+        return ("Make a Fresh Mix", "RunPlugin(%s?artist=%s)" % (
+            plugin.url_for(recent_fresh_radio), quote(str(arg), safe="")))
+    folder = _playlist_folder_url(kind, arg)
+    return ("Open Latest Version", "Container.Update(%s)" % folder) if folder else None
+
+
+@plugin.route("/recent")
+def recent_lists():
+    """Recent Radio & Playlists: the exact lists played lately."""
+    rows = _recent_load()
+    xbmcplugin.setPluginCategory(plugin.handle, "Recent Radio & Playlists")
+    if not rows:
+        li = xbmcgui.ListItem("Nothing played yet", path=_info_row_url())
+        li.setLabel2("Radio stations and playlists you play appear here")
+        li.setArt({"icon": ICON_RADIO, "fanart": FANART})
+        xbmcplugin.addDirectoryItem(plugin.handle, _info_row_url(), li, False)
+    for row in rows:
+        entries = row.get("entries", [])
+        li = xbmcgui.ListItem(row.get("label") or _RECENT_TYPES.get(row.get("kind"), "List"))
+        li.setLabel2("%s · %d track%s · played %s" % (
+            _RECENT_TYPES.get(row.get("kind"), "Playlist"), len(entries),
+            "" if len(entries) == 1 else "s", _ago(row.get("played"))))
+        lead = (str(row.get("arg", "")) if row.get("kind") == "radio" else
+                next((e.get("artist", "") for e in entries if e.get("artist")), ""))
+        li.setArt(_list_artwork(row.get("kind"), row.get("arg"), entries))
+        _set_music_tag(li, title=row.get("label", ""), artist=lead)
+        play = (plugin.url_for(playlists_play) + "?kind=recent&arg=" + row["id"]
+                + "&label=" + quote(row.get("label", ""), safe=""))
+        actions = [("Play", "RunPlugin(%s)" % play)]
+        fresh = _fresh_mix_action(row)
+        if fresh:
+            actions.append(fresh)
+        actions.append(("Save Snapshot to My Playlists", "RunPlugin(%s)" % _user_playlist_add_url(
+            "snapshot", kind="recent", arg=row["id"], label=row.get("label", ""))))
+        actions.append(("Remove from Recent", "RunPlugin(%s?id=%s)" % (
+            plugin.url_for(recent_remove), row["id"])))
+        li.addContextMenuItems(actions, replaceItems=False)
+        xbmcplugin.addDirectoryItem(
+            plugin.handle, plugin.url_for(recent_open) + "?id=" + row["id"], li, True)
+    xbmcplugin.endOfDirectory(plugin.handle, cacheToDisc=False)
+
+
+@plugin.route("/recent/open")
+def recent_open():
+    row = _recent_get(_route_arg("id"))
+    if not row:
+        xbmcplugin.endOfDirectory(plugin.handle, succeeded=False)
+        return
+    _render_playlist("recent", row["id"], row.get("label", "Recent"),
+                     entries=[dict(entry) for entry in row.get("entries", [])])
+
+
+@plugin.route("/recent/fresh_radio")
+def recent_fresh_radio():
+    """Forget a saved Artist Radio station and open it, so it is built anew.
+
+    A one-off action: the radio page refreshes itself while building, so the
+    reset must not be part of the page's own address.
+    """
+    artist = _route_arg("artist")
+    if not artist:
+        return
+    _make_playlists(quiet=True).cache.put(_radio_cache_key(artist),
+                                          {"entries": [], "complete": False})
+    xbmc.executebuiltin("Container.Update(%s?artist=%s)" % (
+        plugin.url_for(playlists_radio_artist), quote(artist, safe="")))
+
+
+@plugin.route("/recent/remove")
+def recent_remove():
+    recent_id = _route_arg("id")
+    _recent_save([row for row in _recent_load() if row.get("id") != recent_id])
+    xbmc.executebuiltin("Container.Refresh")
+
+
+def _set_now_playing(kind, arg, label, session="", files=None, recent_id="", first=None):
+    """Remember which Rotation list is playing, for the Now Playing entry.
+
+    The first track is kept so the list's artwork can be looked up without
+    fetching it again (an album's cover comes from its first track).
+    """
+    first = {key: first[key] for key in _RECENT_FIELDS if (first or {}).get(key)}
+    xbmcgui.Window(10000).setProperty(NOW_PLAYING_KEY, json.dumps({
+        "kind": kind, "arg": str(arg), "label": label or "", "session": session,
+        "recent": recent_id, "first": first, "files": list(files or [])[-500:]}))
+
+
+def _list_artwork(kind, arg, entries=None):
+    """The artwork a list shows on its own page, for entries that point to it.
+
+    Artist Radio and Top Tracks: the artist. Albums: the album cover (library
+    first). My Playlists: its cover mosaic. Charts and editorial playlists:
+    their playlist cover. Library Radio: the artist for artist stations.
+    Cache-only, so it never slows down the screen that shows it.
+    """
+    try:
+        if kind == "recent":
+            row = _recent_get(arg) or {}
+            if row:
+                return _list_artwork(row.get("kind"), row.get("arg"), row.get("entries"))
+        if kind == "library_radio":
+            mode, _, value = str(arg).partition("|")
+            return (_playlist_artist_summary_art(value) if mode == "artist" and value
+                    else _art("", FALLBACK_FANART, ICON_RADIO))
+        if kind:
+            return _playlist_summary_art(kind, arg, list(entries or []))
+    except Exception as exc:
+        xbmc.log("[rotation] List artwork lookup failed for %s/%s: %s" % (kind, arg, exc),
+                 xbmc.LOGDEBUG)
+    return _art("", FALLBACK_FANART, ICON_PLAYLISTS)
+
+
+def _now_playing_art(info):
+    first = info.get("first") or {}
+    return _list_artwork(info.get("kind"), info.get("arg"), [first] if first else [])
+
+
+def _now_playing_info():
+    """The playing Rotation list, or None (something else is playing)."""
+    try:
+        player = xbmc.Player()
+        if not player.isPlayingAudio():
+            return None
+        playing = player.getPlayingFile()
+        info = json.loads(xbmcgui.Window(10000).getProperty(NOW_PLAYING_KEY) or "{}")
+    except Exception:
+        return None
+    if not info:
+        return None
+    if info.get("session"):
+        state = _read_playback_queue()
+        if state.get("session") == info["session"] and playing in (state.get("issued") or {}):
+            return info
+        return None
+    return info if playing in info.get("files", []) else None
+
+
+@plugin.route("/now_playing")
+def now_playing():
+    """The list that is playing: played, playing now, and still to come."""
+    info = _now_playing_info()
+    xbmcplugin.setPluginCategory(plugin.handle, "Now Playing")
+    if not info:
+        li = xbmcgui.ListItem("Nothing from Rotation is playing", path=_info_row_url())
+        li.setArt({"icon": ICON_PLAYLISTS, "fanart": FANART})
+        xbmcplugin.addDirectoryItem(plugin.handle, _info_row_url(), li, False)
+        xbmcplugin.endOfDirectory(plugin.handle, cacheToDisc=False)
+        return
+    playlist = xbmc.PlayList(xbmc.PLAYLIST_MUSIC)
+    position = max(0, playlist.getposition())
+    state = _read_playback_queue() if info.get("session") else {}
+    remaining = state.get("remaining") or []
+    total = playlist.size() + len(remaining)
+    summary = xbmcgui.ListItem("Now Playing · %s" % info.get("label", ""), path=_info_row_url())
+    summary.setLabel2("%d of %d · %d to go" % (position + 1, total, total - position - 1))
+    summary.setArt(_now_playing_art(info))
+    if info.get("recent"):
+        summary.addContextMenuItems([("Save Snapshot to My Playlists", "RunPlugin(%s)" %
+            _user_playlist_add_url("snapshot", kind="recent", arg=info["recent"],
+                                   label=info.get("label", "")))], replaceItems=False)
+    xbmcplugin.addDirectoryItem(plugin.handle, _info_row_url(), summary, False)
+    jump = plugin.url_for(now_playing_jump)
+    issued = state.get("issued") or {}
+    for index in range(playlist.size()):
+        item = playlist[index]
+        path = item.getPath()
+        row = issued.get(path) or {}
+        entry, song = row.get("entry") or {}, row.get("song") or {}
+        try:
+            tag = item.getMusicInfoTag()
+            title = tag.getTitle() or entry.get("title") or song.get("title", "")
+            artist = tag.getArtist() or entry.get("artist") or song.get("artist", "")
+            album = tag.getAlbum() or entry.get("album", "")
+        except Exception:
+            title, artist, album = item.getLabel(), "", ""
+        status = ("Played" if index < position else
+                  "Playing now" if index == position else "Up next")
+        li = xbmcgui.ListItem("%s — %s" % (artist, title) if artist else title,
+                              path="%s?pos=%d" % (jump, index))
+        li.setLabel2(status)
+        try:
+            art = {key: item.getArt(key) for key in ("thumb", "fanart", "clearlogo")}
+            li.setArt({k: v for k, v in art.items() if v} or _player_art(entry, song))
+        except Exception:
+            li.setArt(_player_art(entry, song))
+        _set_music_tag(li, title=title, artist=artist, album=album)
+        li.setProperty("IsPlayable", "false")
+        if index == position:
+            li.select(True)
+        xbmcplugin.addDirectoryItem(plugin.handle, "%s?pos=%d" % (jump, index), li, False)
+    # Songs Rotation is still holding back (streamed lists hand Kodi one at a time).
+    for index, row in enumerate(remaining):
+        entry, song = row.get("entry") or {}, row.get("song") or {}
+        title = entry.get("title") or song.get("title", "")
+        artist = entry.get("artist") or song.get("artist", "")
+        li = xbmcgui.ListItem("%s — %s" % (artist, title) if artist else title,
+                              path="%s?later=%d" % (jump, index))
+        li.setLabel2("Coming up")
+        li.setArt(_player_art(entry, song))
+        _set_music_tag(li, title=title, artist=artist, album=entry.get("album", ""))
+        li.setProperty("IsPlayable", "false")
+        xbmcplugin.addDirectoryItem(plugin.handle, "%s?later=%d" % (jump, index), li, False)
+    _set_view("songs")
+    xbmcplugin.endOfDirectory(plugin.handle, cacheToDisc=False)
+
+
+@plugin.route("/now_playing/jump")
+def now_playing_jump():
+    """Play another song of the playing list without starting it over."""
+    if _route_arg("pos"):
+        xbmc.Player().playselected(int(_route_arg("pos")))
+        xbmc.executebuiltin("Container.Refresh")
+        return
+    later = _route_arg("later")
+    state = _read_playback_queue()
+    info = _now_playing_info()
+    if not later or not info or state.get("session") != info.get("session"):
+        return
+    remaining = state.get("remaining") or []
+    index = int(later)
+    if index >= len(remaining):
+        return
+    chosen = remaining.pop(index)
+    # Take back whatever Kodi has queued after the current song, so the
+    # chosen one plays next; those songs keep their place in the list.
+    playlist = xbmc.PlayList(xbmc.PLAYLIST_MUSIC)
+    position = max(0, playlist.getposition())
+    issued = state.get("issued") or {}
+    returned = []
+    for item_index in range(playlist.size() - 1, position, -1):
+        url = playlist[item_index].getPath()
+        if url in issued:
+            playlist.remove(url)
+            returned.insert(0, issued.pop(url))
+    state["remaining"] = returned + remaining
+    entry, song = chosen.get("entry") or {}, chosen.get("song")
+    try:
+        if song:
+            url, li = song["file"], _player_song_item(song, entry, chosen.get("position") or 0)
+        else:
+            url = _resolve_musicmp3_stream(entry, session=state.get("session", ""))
+            li = _resolved_remote_listitem(entry, url, chosen.get("position") or 0)
+    except Exception as exc:
+        xbmc.log("[rotation] Now Playing jump failed for %r / %r: %s" % (
+            entry.get("artist"), entry.get("title"), exc), xbmc.LOGWARNING)
+        _write_playback_queue(state)
+        xbmcgui.Dialog().notification(plugin.name, "That song can't be played right now",
+                                      xbmcgui.NOTIFICATION_WARNING, 4000)
+        return
+    playlist.add(url, li)
+    _issue_row(state, url, chosen)
+    _write_playback_queue(state)
+    xbmc.Player().playnext()
     xbmc.executebuiltin("Container.Refresh")
 
 
@@ -5192,6 +5540,9 @@ def _playlist_entries(kind, arg=""):
         entries = (_user_playlists().get(arg).get("tracks", []))
     elif kind == "for_you":
         entries = _for_you_entries(arg)
+    elif kind == "recent":
+        # The exact list that was played, not a regenerated one.
+        entries = [dict(entry) for entry in (_recent_get(arg) or {}).get("entries", [])]
     if kind in ("artist_top", "radio"):
         entries = _dedupe_track_entries(
             entries, min(50, limit) if kind == "artist_top" else limit)
@@ -5708,6 +6059,10 @@ def _start_playlist_artwork(entries, tracks, path, folder="", force_refresh=Fals
         refresh_needed = bool(window.getProperty(force_key))
         if completed:
             window.clearProperty(force_key)
+            if changed:
+                # Artwork that arrived while this list plays reaches the
+                # current song now, not only the songs queued after it.
+                _refresh_now_playing_art()
         if (changed or refresh_needed) and completed:
             xbmc.log("[rotation] Playlist artwork pass complete; one redraw queued",
                      xbmc.LOGINFO)
@@ -6259,19 +6614,19 @@ def unavailable_browse(mode):
             li = xbmcgui.ListItem("%s — %s" % (item.get("artist", ""), item.get("title", "")))
             li.addContextMenuItems([("Restore", "RunPlugin(%s)" % _report_action_url("restore_track", key))])
             li.setArt(_art("", fallback=FALLBACK_ALBUM))
-            xbmcplugin.addDirectoryItem(plugin.handle, "", li, False)
+            xbmcplugin.addDirectoryItem(plugin.handle, _info_row_url(), li, False)
         for key, name in sorted(ignored.get("artists", {}).items()):
             li = xbmcgui.ListItem("Ignored artist: %s" % name)
             li.addContextMenuItems([("Restore", "RunPlugin(%s)" % _report_action_url("restore_artist", key))])
             li.setArt(_art("", fallback=FALLBACK_ARTIST))
-            xbmcplugin.addDirectoryItem(plugin.handle, "", li, False)
+            xbmcplugin.addDirectoryItem(plugin.handle, _info_row_url(), li, False)
         for key, item in sorted(ignored.get("albums", {}).items()):
             li = xbmcgui.ListItem("Ignored album: %s — %s" %
                                   (item.get("artist", ""), item.get("album", "")))
             li.addContextMenuItems([("Restore", "RunPlugin(%s)" %
                                     _report_action_url("restore_album", value=key))])
             li.setArt(_art("", fallback=FALLBACK_ALBUM))
-            xbmcplugin.addDirectoryItem(plugin.handle, "", li, False)
+            xbmcplugin.addDirectoryItem(plugin.handle, _info_row_url(), li, False)
         xbmcplugin.endOfDirectory(plugin.handle)
         return
     today = datetime.date.today().isoformat()
@@ -6658,12 +7013,89 @@ def _read_playback_queue():
         return {}
 
 
+def _player_art(entry, song=None):
+    """Artwork for a song handed to Kodi's player, read when it is queued.
+
+    The same order as the pages: Kodi library album, the song's library
+    thumb, the resolved online cover (fanart.tv first), then the provider's
+    own cover; artist fanart and clearlogo from the primary artist. Player
+    items used to take only the provider cover (streams) or the library
+    thumb, so artwork downloaded after a station started never reached the
+    player. Cache-only: no network request.
+    """
+    entry = entry or {}
+    song = song or {}
+    artist = entry.get("artist", "") or song.get("artist", "")
+    album = entry.get("album", "") or song.get("album", "")
+    try:
+        match = _playlist_match_art(_load_availability(), entry) if entry else {}
+    except Exception:
+        match = {}
+    site = (entry.get("cover", "") or match.get("cover", "") or match.get("image", "")
+            or (song.get("source") or {}).get("cover", ""))
+    artwork = _album_artwork(entry.get("album_artist") or artist, album,
+                             site_cover=site, library_thumb=song.get("thumb", ""),
+                             cache_artist=artist)
+    return _album_art_dict(artwork)
+
+
+def _player_song_item(song, entry, position=0):
+    """Library song for the player, with the full artwork lookup."""
+    li = _playlist_listitem(song, position)
+    try:
+        li.setArt(_player_art(entry, song))
+    except Exception as exc:
+        xbmc.log("[rotation] Player artwork lookup failed: %s" % exc, xbmc.LOGDEBUG)
+    return li
+
+
+def _refresh_now_playing_art():
+    """Give the playing song artwork that arrived after it was queued.
+
+    Uses Kodi's updateInfoTag, which replaces the playing item's details.
+    Only for songs from the current Rotation session, and only when the
+    cover would actually change.
+    """
+    try:
+        player = xbmc.Player()
+        if not player.isPlayingAudio():
+            return False
+        playing = player.getPlayingFile()
+        state = _read_playback_queue()
+        row = (state.get("issued") or {}).get(playing)
+        if not row:
+            return False
+        entry, song = row.get("entry") or {}, row.get("song") or {}
+        art = _player_art(entry, song)
+        current = xbmc.getInfoLabel("Player.Art(thumb)")
+        if not art.get("thumb") or art["thumb"] == FALLBACK_ALBUM or \
+                unquote(current).rstrip("/").endswith(unquote(art["thumb"]).rstrip("/")):
+            return False
+        li = xbmcgui.ListItem(entry.get("title") or song.get("title", ""), path=playing)
+        li.setArt(art)
+        _set_music_tag(li, title=entry.get("title") or song.get("title", ""),
+                       artist=entry.get("artist") or song.get("artist", ""),
+                       album=entry.get("album") or song.get("album", ""),
+                       duration=entry.get("duration") or song.get("duration", 0),
+                       tracknumber=row.get("position") or 0)
+        player.updateInfoTag(li)
+        xbmc.log("[rotation] Updated artwork of the playing song: %s / %s"
+                 % (entry.get("artist"), entry.get("title")), xbmc.LOGINFO)
+        return True
+    except Exception as exc:
+        xbmc.log("[rotation] Now-playing artwork update skipped: %s" % exc, xbmc.LOGDEBUG)
+        return False
+
+
 def _resolved_remote_listitem(entry, url, position=0):
     """Create a playable item whose URL has already passed preflight."""
     artist, title = entry.get("artist", ""), entry.get("title", "")
     li = xbmcgui.ListItem(title, path=url)
-    li.setArt(_art(entry.get("cover", ""), _cached_background(artist),
-                   clearlogo=_cached_logo(artist)))
+    try:
+        li.setArt(_player_art(entry))
+    except Exception:
+        li.setArt(_art(entry.get("cover", ""), _cached_background(artist),
+                       clearlogo=_cached_logo(artist)))
     li.setMimeType("audio/mpeg")
     li.setContentLookup(False)
     _set_music_tag(li, title=title, artist=artist,
@@ -6698,6 +7130,8 @@ def _playlist_folder_url(kind, arg):
         return plugin.url_for(playlists_country)
     if kind == "for_you":
         return plugin.url_for(for_you_browse, str(arg))
+    if kind == "recent":
+        return plugin.url_for(recent_open) + "?id=" + str(arg)
     return ""  # Search and radio routes have no stable directory URL.
 
 
@@ -6942,7 +7376,7 @@ def _playlist_summary_info(kind, arg, entries, heading):
 
 
 def _add_playlist_summary(entries, tracks=None, availability_complete=False, artwork=None,
-                          context_menu=None, info=None):
+                          context_menu=None, info=None, play_url=""):
     """Add cross-skin target and playable totals above a track listing."""
     count = len(entries)
     label = "Target: %d song%s" % (count, "" if count == 1 else "s")
@@ -6982,7 +7416,11 @@ def _add_playlist_summary(entries, tracks=None, availability_complete=False, art
     if context_menu:
         summary.addContextMenuItems(context_menu, replaceItems=False)
     summary.setProperty("IsPlayable", "false")
-    xbmcplugin.addDirectoryItem(plugin.handle, "", summary, False)
+    if play_url:
+        # Selecting the summary row plays the whole list (Play All). With no
+        # path, Kodi tried to play an empty file and then queued the page.
+        summary.setPath(play_url)
+    xbmcplugin.addDirectoryItem(plugin.handle, play_url, summary, False)
 
 
 def _add_library_radio_summary(tracks, artwork=None, context_menu=None):
@@ -6993,7 +7431,18 @@ def _add_library_radio_summary(tracks, artwork=None, context_menu=None):
     if context_menu:
         summary.addContextMenuItems(context_menu, replaceItems=False)
     summary.setProperty("IsPlayable", "false")
-    xbmcplugin.addDirectoryItem(plugin.handle, "", summary, False)
+    xbmcplugin.addDirectoryItem(plugin.handle, _info_row_url(), summary, False)
+
+
+@plugin.route("/noop")
+def noop():
+    """Target for information-only rows. An empty path made Kodi try to play
+    a nameless file and queue the rest of the page."""
+    return
+
+
+def _info_row_url():
+    return plugin.url_for(noop)
 
 
 def _render_playlist(kind, arg, heading, entries=None, building=False):
@@ -7052,6 +7501,9 @@ def _render_playlist(kind, arg, heading, entries=None, building=False):
     scan_status = window.getProperty(_playlist_scan_key(folder)) if folder else ""
 
     context = _playlist_play_context(kind, arg, heading)
+    play_base = (plugin.url_for(playlists_play) + "?kind=" + quote(kind, safe="")
+                 + "&arg=" + quote(str(arg), safe="")
+                 + "&label=" + quote(heading or "", safe=""))
     favorites_api = _favorites()
     radio_context = []
     if kind == "radio":
@@ -7095,7 +7547,8 @@ def _render_playlist(kind, arg, heading, entries=None, building=False):
     _add_playlist_summary(entries, tracks, availability_complete,
                           artwork=_playlist_summary_art(kind, arg, entries),
                           context_menu=summary_context,
-                          info=summary_info)
+                          info=summary_info,
+                          play_url=_info_row_url() if building else play_base)
     # Every track on an album page shares the album's year, release date,
     # genre and description (facts line or "about" text), so whatever the
     # skin shows for the album stays in place while moving through its
@@ -7124,7 +7577,7 @@ def _render_playlist(kind, arg, heading, entries=None, building=False):
         li = xbmcgui.ListItem("No playable tracks found")
         li.setLabel2("The complete provider track list is shown below")
         li.setArt({"icon": ICON_SEARCH, "fanart": FANART})
-        xbmcplugin.addDirectoryItem(plugin.handle, "", li, False)
+        xbmcplugin.addDirectoryItem(plugin.handle, _info_row_url(), li, False)
     elif playable_count:
         notice_key = "Rotation.UnavailableNotice.%s" % hashlib.sha1(
             _current_plugin_path().encode("utf-8")).hexdigest()[:16]
@@ -7202,6 +7655,15 @@ def _render_playlist(kind, arg, heading, entries=None, building=False):
         li.addContextMenuItems(context + user_context + album_context
                                + artist_context + match_context + radio_context,
                                replaceItems=False)
+        if play_base and not building:
+            # Selecting a track plays this list from that track through
+            # Rotation's own queue. Left to Kodi, a click queued every row of
+            # the page as its own plugin item; when several in a row weren't
+            # on MusicMP3.ru, each resolved and skipped within a second and
+            # Kodi crashed ("two concurrent busydialogs").
+            url = play_base + "&start=" + _prewarm_key(entry)
+            li.setPath(url)
+            li.setProperty("IsPlayable", "false")
         xbmcplugin.addDirectoryItem(plugin.handle, url, li, False)
 
     if building or needs_scan or scan_status:
@@ -7220,17 +7682,19 @@ def _render_playlist(kind, arg, heading, entries=None, building=False):
             # Do not present an initial zero-count result before the worker has
             # actually checked anything.
             message = "Checking playable tracks…"
-        li = xbmcgui.ListItem("[COLOR grey]%s[/COLOR]" % message)
+        li = xbmcgui.ListItem("[COLOR grey]%s[/COLOR]" % message, path=_info_row_url())
         li.setArt({"icon": ICON_SEARCH, "fanart": FANART})
+        li.setProperty("IsPlayable", "false")
         if radio_context:
             li.addContextMenuItems(radio_context, replaceItems=False)
-        xbmcplugin.addDirectoryItem(plugin.handle, "", li, False)
+        xbmcplugin.addDirectoryItem(plugin.handle, _info_row_url(), li, False)
     elif not tracks:
-        li = xbmcgui.ListItem("No playable tracks found")
+        li = xbmcgui.ListItem("No playable tracks found", path=_info_row_url())
         li.setArt({"icon": ICON_SEARCH, "fanart": FANART})
+        li.setProperty("IsPlayable", "false")
         if radio_context:
             li.addContextMenuItems(radio_context, replaceItems=False)
-        xbmcplugin.addDirectoryItem(plugin.handle, "", li, False)
+        xbmcplugin.addDirectoryItem(plugin.handle, _info_row_url(), li, False)
 
     _set_view("songs")
     xbmcplugin.endOfDirectory(plugin.handle, cacheToDisc=False)
@@ -7633,7 +8097,7 @@ def user_playlist_open(playlist_id):
         empty = xbmcgui.ListItem("This playlist is empty")
         empty.setLabel2("Use Add to My Playlist from a song, album or artist")
         empty.setArt({"icon": ICON_SONGS, "fanart": FANART})
-        xbmcplugin.addDirectoryItem(plugin.handle, "", empty, False)
+        xbmcplugin.addDirectoryItem(plugin.handle, _info_row_url(), empty, False)
         _set_view("songs")
         xbmcplugin.endOfDirectory(plugin.handle, cacheToDisc=False)
         return
@@ -7985,6 +8449,11 @@ def library_radio_play():
         playlist.add(song["file"], _playlist_listitem(song, position))
     if playlist.size():
         _start_in_player_order(playlist, force_shuffle=shuffle)
+        label = _route_arg("label") or "Library Radio"
+        recent_id = _remember_recent("library_radio", "%s|%s" % (mode, value), label, tracks)
+        _set_now_playing("library_radio", "%s|%s" % (mode, value), label,
+                         files=[song["file"] for song in tracks], recent_id=recent_id,
+                         first=tracks[0] if tracks else None)
     else:
         _notify_error("No local tracks found for this Library Radio station.")
 
@@ -8711,6 +9180,8 @@ def playlists_play():
     # Order follows the player's shuffle button, as in Kodi's library. The
     # old "&shuffle=1" argument is still honoured for saved shortcuts.
     shuffle = (plugin.args.get("shuffle", ["0"])[0] == "1") or _player_shuffled()
+    # Set when a track row was selected: play this list from that track.
+    start_key = plugin.args.get("start", [""])[0]
 
     if not kind:
         return
@@ -8720,6 +9191,7 @@ def playlists_play():
         xbmcgui.Dialog().notification(
             plugin.name, "No tracks found.", xbmcgui.NOTIFICATION_WARNING, 3000)
         return
+    played_entries = list(entries)    # the list as shown, before any shuffle
 
     progress = xbmcgui.DialogProgress()
     progress.create("Preparing Playlist", "Locating playable sources…")
@@ -8770,7 +9242,20 @@ def playlists_play():
         return
     # Shuffle All always opens with owned music when at least one library song
     # exists. Only the first item is promoted; the rest retain shuffled order.
-    if shuffle:
+    behind = []
+    chosen_at = (next((i for i, row in enumerate(queued)
+                       if _prewarm_key(row[1]) == start_key), None)
+                 if start_key else None)
+    if chosen_at is not None:
+        if shuffle:
+            queued.insert(0, queued.pop(chosen_at))
+        else:
+            # Like Kodi's library: start at the chosen song; earlier songs
+            # are set aside (and return if shuffle is turned on).
+            behind = [{"song": song, "entry": entry, "position": position}
+                      for song, entry, position in queued[:chosen_at]]
+            queued = queued[chosen_at:]
+    elif shuffle:
         local_at = next((i for i, row in enumerate(queued) if row[0]), None)
         if local_at not in (None, 0):
             queued.insert(0, queued.pop(local_at))
@@ -8805,7 +9290,7 @@ def playlists_play():
                         "Locating playable sources…")
         song, entry, position = queued.pop(0)
         if song:
-            buffered.append((song["file"], _playlist_listitem(song, position)))
+            buffered.append((song["file"], _player_song_item(song, entry, position)))
             issued_rows.append((song["file"], {"song": song, "entry": entry,
                                                "position": position}))
             continue
@@ -8824,7 +9309,7 @@ def playlists_play():
                 local_rows = [row for row in queued if row[0]]
                 for local_song, local_entry, local_position in local_rows:
                     buffered.append((local_song["file"],
-                                     _playlist_listitem(local_song, local_position)))
+                                     _player_song_item(local_song, local_entry, local_position)))
                 queued = [row for row in queued if not row[0]]
                 _musicmp3_outage_notice(bool(local_rows) or any(
                     not url.startswith(("http://", "https://")) for url, _ in buffered),
@@ -8846,7 +9331,7 @@ def playlists_play():
     remaining = [{"song": song, "entry": entry, "position": position}
                  for song, entry, position in queued]
     state = {"session": session, "created": time.time(),
-             "remaining": remaining, "shuffled": bool(shuffle), "behind": []}
+             "remaining": remaining, "shuffled": bool(shuffle), "behind": behind}
     for url, row in issued_rows:
         _issue_row(state, url, row)
     _write_playback_queue(state)
@@ -8866,6 +9351,12 @@ def playlists_play():
     xbmc.Player().play(playlist)
     progress.close()
     action_window.setProperty("Rotation.PlayActionUntil", str(time.time() + 5))
+    recent_id = _remember_recent(kind, arg, label, played_entries)
+    if kind == "recent":
+        row = _recent_get(arg) or {}
+        label = row.get("label", label)
+    _set_now_playing(kind, arg, label, session=session, recent_id=recent_id,
+                     first=played_entries[0] if played_entries else None)
     _notify_playlist_count(len(tracks), len(entries))
     folder = _playlist_folder_url(kind, arg)
     _start_playlist_artwork(entries, tracks, folder, folder,
@@ -9433,15 +9924,45 @@ def _checked_stream(api, url):
         stream_slots.release_stream_slot(handoff=True)
 
 
+_NO_MATCH_KEY = "Rotation.MusicMP3.NoMatch"
+NO_MATCH_TTL = 30 * 60
+
+
+def _no_match_rows():
+    try:
+        rows = json.loads(xbmcgui.Window(10000).getProperty(_NO_MATCH_KEY) or "{}")
+    except ValueError:
+        rows = {}
+    now = time.time()
+    return {key: when for key, when in rows.items() if now - when < NO_MATCH_TTL}
+
+
+def _known_no_match(entry):
+    """True when this song was searched for recently and isn't on MusicMP3.ru
+    (and no match has been picked for it by hand since)."""
+    if saved_match(entry):
+        return False
+    return _prewarm_key(entry) in _no_match_rows()
+
+
+def _remember_no_match(entry):
+    rows = _no_match_rows()
+    rows[_prewarm_key(entry)] = time.time()
+    xbmcgui.Window(10000).setProperty(_NO_MATCH_KEY, json.dumps(dict(list(rows.items())[-500:])))
+
+
 def _verified_musicmp3_track(entry, routine=False):
     """Retry a genuine network failure once, never retry a missing track."""
     if _musicmp3_cooldown_remaining():
         raise RuntimeError("Streaming source unavailable (cooldown)")
+    if _known_no_match(entry):
+        raise ValueError("No matching stream was found")
     for attempt in range(2):
         api = _make_musicmp3(timeout_override=2 if attempt == 0 else 1)
         match = _find_musicmp3_track(api, entry)
         if not match:
             if not api.last_error:
+                _remember_no_match(entry)
                 raise ValueError("No matching stream was found")
         else:
             url = api.play_url(match["track_id"], match["rel"],
@@ -9557,6 +10078,7 @@ def playlists_lookahead():
         if not session or state.get("session") != session:
             return
         playing_file = xbmc.Player().getPlayingFile()
+        _refresh_now_playing_art()
         played = state.setdefault("played", [])
         if playing_file and playing_file not in played:
             played.append(playing_file)
@@ -9574,7 +10096,7 @@ def playlists_lookahead():
             try:
                 if song:
                     url = song["file"]
-                    li = _playlist_listitem(song, position)
+                    li = _player_song_item(song, entry, position)
                 else:
                     url = _resolve_musicmp3_stream(entry, session=session,
                                                    expected_file=playing_file,
@@ -9610,8 +10132,9 @@ def playlists_lookahead():
                     for local_row in local_rows:
                         local_song = local_row["song"]
                         xbmc.PlayList(xbmc.PLAYLIST_MUSIC).add(
-                            local_song["file"], _playlist_listitem(
-                                local_song, local_row.get("position") or 0))
+                            local_song["file"], _player_song_item(
+                                local_song, local_row.get("entry"),
+                                local_row.get("position") or 0))
                     remaining = [item for item in remaining if not item.get("song")]
                     appended = bool(local_rows)
                     _musicmp3_outage_notice(bool(local_rows),
@@ -9631,6 +10154,37 @@ def playlists_lookahead():
     finally:
         if window.getProperty("Rotation.LookaheadSession") in ("", session):
             window.clearProperty("Rotation.LookaheadBusy")
+
+
+_FALLBACK_FAILS = "Rotation.FallbackFailures"
+
+
+def _count_fallback_failure():
+    """Unavailable songs in a row (within 30 s of each other)."""
+    window = xbmcgui.Window(10000)
+    try:
+        count, last = json.loads(window.getProperty(_FALLBACK_FAILS) or "[0, 0]")
+    except (ValueError, TypeError):
+        count, last = 0, 0
+    count = count + 1 if time.time() - last < 30 else 1
+    window.setProperty(_FALLBACK_FAILS, json.dumps([count, time.time()]))
+    return count
+
+
+def _drop_queued_stream_rows():
+    """Remove Rotation streaming rows after the current song; returns how many."""
+    playlist = xbmc.PlayList(xbmc.PLAYLIST_MUSIC)
+    try:
+        current = max(-1, playlist.getposition())
+        doomed = [playlist[i].getPath() for i in range(current + 1, playlist.size())]
+        doomed = [path for path in doomed
+                  if path.startswith("plugin://plugin.audio.rotation/") and "/library/play" in path]
+        for path in doomed:
+            playlist.remove(path)
+        return len(doomed)
+    except Exception as exc:
+        xbmc.log("[rotation] Could not trim unavailable rows: %s" % exc, xbmc.LOGWARNING)
+        return 0
 
 
 def _play_musicmp3_fallback(artist, title, album="", cover="", session=""):
@@ -9680,6 +10234,7 @@ def _play_musicmp3_fallback(artist, title, album="", cover="", session=""):
                        album=track.album or album,
                        duration=track.duration or 0)
         xbmcplugin.setResolvedUrl(plugin.handle, True, li)
+        xbmcgui.Window(10000).clearProperty(_FALLBACK_FAILS)
         xbmc.log("[rotation] MusicMP3.ru stream resolved: %r / %r" %
                  (artist, title), xbmc.LOGINFO)
     except Exception as exc:
@@ -9702,6 +10257,20 @@ def _play_musicmp3_fallback(artist, title, album="", cover="", session=""):
         li.setContentLookup(False)
         _set_music_tag(li, title=title, artist=artist, album=album, duration=1)
         xbmcplugin.setResolvedUrl(plugin.handle, True, li)
+        if not source_down and _count_fallback_failure() >= 3:
+            # Kodi queued these songs itself (a widget, My Songs, …). Each
+            # unavailable one resolves to a one-second skip, and a long run
+            # of them makes Kodi crash on overlapping busy dialogs. Stop the
+            # chain: drop the remaining Rotation streaming rows.
+            removed = _drop_queued_stream_rows()
+            xbmcgui.Window(10000).clearProperty(_FALLBACK_FAILS)
+            if removed:
+                xbmcgui.Dialog().notification(
+                    "Tracks unavailable",
+                    "Skipped %d more song%s that can't be streamed" % (
+                        removed, "" if removed == 1 else "s"),
+                    xbmcgui.NOTIFICATION_WARNING, 5000)
+                return
         if source_down:
             # Resolve the current item first, then remove only unresolved
             # Rotation streaming rows. Local files later in a mixed playlist
