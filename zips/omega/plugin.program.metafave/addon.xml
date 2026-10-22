@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<addon id="plugin.program.metafave" name="MetaFave" version="1.0.2" provider-name="SEA6ULL / Claude / GPT">
+    <requires>
+        <import addon="xbmc.python" version="3.0.1"/>
+    </requires>
+    <extension point="xbmc.python.pluginsource" library="default.py">
+        <provides>executable video audio image</provides>
+    </extension>
+    <extension point="kodi.context.item">
+        <menu id="kodi.core.main">
+            <item library="context.py">
+                <label>30000</label>
+                <visible>!ListItem.IsParentFolder + [!String.IsEmpty(ListItem.FolderPath) | !String.IsEmpty(ListItem.FileNameAndPath)] + !String.StartsWith(ListItem.FolderPath,plugin://plugin.program.metafave) + !String.StartsWith(Container.FolderPath,plugin://plugin.program.metafave) + !Window.IsActive(favouritesbrowser) + !String.StartsWith(ListItem.FolderPath,favourites://)</visible>
+            </item>
+        </menu>
+    </extension>
+    <extension point="xbmc.addon.metadata">
+        <reuselanguageinvoker>true</reuselanguageinvoker>
+        <summary lang="en_GB">Organize favorites and shortcuts into folders for your widgets.</summary>
+        <description lang="en_GB">MetaFave collects favorites and shortcuts from anywhere in Kodi into your own folders and nested folders, preserving each item's artwork, metadata and destination. Every folder can be used directly as a widget source. Use "Add to MetaFave" from any context menu, then organize, copy, edit and repair your collections inside the add-on.</description>
+        <disclaimer lang="en_GB">MetaFave stores shortcuts only. Deleting an entry never affects the original media or source content.</disclaimer>
+        <platform>all</platform>
+        <license>GPL-3.0-only</license>
+        <source></source>
+        <assets>
+            <icon>resources/icon.png</icon>
+            <fanart>resources/fanart.jpg</fanart>
+            <screenshot>resources/screenshots/01-folders.jpg</screenshot>
+            <screenshot>resources/screenshots/02-tv-shows.jpg</screenshot>
+            <screenshot>resources/screenshots/03-music.jpg</screenshot>
+            <screenshot>resources/screenshots/04-edit-artwork.jpg</screenshot>
+        </assets>
+        <news>v1.0.2 - Screenshots added to the README and the add-on information page.
+v1.0.1 - Set folder artwork from the folder's own contents: "From Items in This Folder" in Edit Artwork, and "Use as Artwork for (folder)" on items and subfolders.</news>
+    </extension>
+</addon>

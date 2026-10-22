@@ -1,0 +1,22 @@
+v1.0.2
+- Docs: README now includes screenshots and a separate "Editing artwork"
+  section. The same screenshots appear on the add-on's information page in
+  Kodi.
+
+v1.0.1
+- New: Edit Artwork for a folder offers "From Items in This Folder" for every
+  cover type. It lists the images of the folder's items and subfolders
+  (including subfolder contents) in display order. Images that suit the
+  chosen type come first, e.g. an episode's show poster for Poster; all other
+  images follow. Duplicates are shown once, and the list is drawn from the
+  first 200 entries with artwork.
+- New: "Use as Artwork for <folder>" on the context menu of items and
+  subfolders. A checklist shows each folder cover type the entry has a
+  suitable image for. Poster, fanart and clear logo start ticked unless the
+  folder already has them; covers the folder already has are marked
+  "replaces current" and only change when ticked.
+- Chosen images are copied into the folder's covers as URLs, so they stay
+  when the source entry is moved or deleted.
+
+v1.0.0
+- Initial release.

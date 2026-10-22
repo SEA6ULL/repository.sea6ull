@@ -1,0 +1,713 @@
+# Kodi Media Center language file
+# Addon Name: MetaFave
+# Addon id: plugin.program.metafave
+# Addon Provider: SEA6ULL / Claude / GPT
+msgid ""
+msgstr ""
+"Project-Id-Version: MetaFave 1.0.2\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-10-22\n"
+"PO-Revision-Date: 2026-10-22\n"
+"Last-Translator: \n"
+"Language-Team: English\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Language: en\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+msgctxt "#30000"
+msgid "Add to MetaFave"
+msgstr ""
+
+msgctxt "#30001"
+msgid "Create New Folder"
+msgstr ""
+
+msgctxt "#30002"
+msgid "Kodi Favorites"
+msgstr ""
+
+msgctxt "#30003"
+msgid "Edit Item"
+msgstr ""
+
+msgctxt "#30004"
+msgid "Edit Artwork"
+msgstr ""
+
+msgctxt "#30005"
+msgid "Copy to Folder"
+msgstr ""
+
+msgctxt "#30006"
+msgid "Delete Item"
+msgstr ""
+
+msgctxt "#30007"
+msgid "Delete Folder"
+msgstr ""
+
+msgctxt "#30008"
+msgid "Rename Folder"
+msgstr ""
+
+msgctxt "#30010"
+msgid "Move Up"
+msgstr ""
+
+msgctxt "#30011"
+msgid "Move Down"
+msgstr ""
+
+msgctxt "#30012"
+msgid "MetaFave (Top Level)"
+msgstr ""
+
+msgctxt "#30014"
+msgid "Folder Name"
+msgstr ""
+
+msgctxt "#30015"
+msgid "Item Name"
+msgstr ""
+
+msgctxt "#30016"
+msgid "Replace Target of Existing Item"
+msgstr ""
+
+msgctxt "#30017"
+msgid "Choose Where to Create the Folder"
+msgstr ""
+
+msgctxt "#30018"
+msgid "Added to %s"
+msgstr ""
+
+msgctxt "#30019"
+msgid "Choose the Item to Repair"
+msgstr ""
+
+msgctxt "#30020"
+msgid "Replace the target of \"%s\" with this item's target? Its name, artwork and metadata are kept."
+msgstr ""
+
+msgctxt "#30021"
+msgid "Target replaced"
+msgstr ""
+
+msgctxt "#30022"
+msgid "This folder has no items."
+msgstr ""
+
+msgctxt "#30023"
+msgid "Delete \"%s\" from MetaFave?"
+msgstr ""
+
+msgctxt "#30024"
+msgid "Delete the folder \"%s\"?"
+msgstr ""
+
+msgctxt "#30025"
+msgid "It contains %d subfolders and %d items, which will also be deleted."
+msgstr ""
+
+msgctxt "#30026"
+msgid "The folder is empty."
+msgstr ""
+
+msgctxt "#30027"
+msgid "Only saved shortcuts are removed. The original media and source content are not affected."
+msgstr ""
+
+msgctxt "#30029"
+msgid "%s (Copy)"
+msgstr ""
+
+msgctxt "#30030"
+msgid "Copied to %s"
+msgstr ""
+
+msgctxt "#30031"
+msgid "Deleted"
+msgstr ""
+
+msgctxt "#30032"
+msgid "New Folder"
+msgstr ""
+
+msgctxt "#30033"
+msgid "This item can't be added because it has no target."
+msgstr ""
+
+msgctxt "#30034"
+msgid "Save changes to \"%s\"?"
+msgstr ""
+
+msgctxt "#30035"
+msgid "Save Changes"
+msgstr ""
+
+msgctxt "#30036"
+msgid "Discard"
+msgstr ""
+
+msgctxt "#30037"
+msgid "Name"
+msgstr ""
+
+msgctxt "#30038"
+msgid "Second Label"
+msgstr ""
+
+msgctxt "#30039"
+msgid "Launch Type"
+msgstr ""
+
+msgctxt "#30040"
+msgid "Target Path or Command"
+msgstr ""
+
+msgctxt "#30041"
+msgid "Open in Window"
+msgstr ""
+
+msgctxt "#30042"
+msgid "Playable"
+msgstr ""
+
+msgctxt "#30043"
+msgid "Edit Metadata"
+msgstr ""
+
+msgctxt "#30044"
+msgid "Edit Properties"
+msgstr ""
+
+msgctxt "#30045"
+msgid "%d types"
+msgstr ""
+
+msgctxt "#30046"
+msgid "%d fields"
+msgstr ""
+
+msgctxt "#30047"
+msgid "Open Folder"
+msgstr ""
+
+msgctxt "#30048"
+msgid "Play or Run Item"
+msgstr ""
+
+msgctxt "#30049"
+msgid "Run Add-on"
+msgstr ""
+
+msgctxt "#30050"
+msgid "Run Script"
+msgstr ""
+
+msgctxt "#30051"
+msgid "Kodi Command"
+msgstr ""
+
+msgctxt "#30052"
+msgid "Videos"
+msgstr ""
+
+msgctxt "#30053"
+msgid "Music"
+msgstr ""
+
+msgctxt "#30054"
+msgid "Programs"
+msgstr ""
+
+msgctxt "#30055"
+msgid "Pictures"
+msgstr ""
+
+msgctxt "#30056"
+msgid "Custom Window..."
+msgstr ""
+
+msgctxt "#30057"
+msgid "Yes"
+msgstr ""
+
+msgctxt "#30058"
+msgid "No"
+msgstr ""
+
+msgctxt "#30060"
+msgid "Choose from This Item's Artwork"
+msgstr ""
+
+msgctxt "#30062"
+msgid "Enter Path or URL"
+msgstr ""
+
+msgctxt "#30064"
+msgid "Custom Type..."
+msgstr ""
+
+msgctxt "#30065"
+msgid "Artwork Type Name"
+msgstr ""
+
+msgctxt "#30066"
+msgid "Add Field"
+msgstr ""
+
+msgctxt "#30067"
+msgid "Add Property"
+msgstr ""
+
+msgctxt "#30068"
+msgid "Property Name"
+msgstr ""
+
+msgctxt "#30069"
+msgid "Remove"
+msgstr ""
+
+msgctxt "#30070"
+msgid "%d items"
+msgstr ""
+
+msgctxt "#30071"
+msgid "That folder no longer exists."
+msgstr ""
+
+msgctxt "#30072"
+msgid "Changes saved"
+msgstr ""
+
+msgctxt "#30073"
+msgid "MetaFave data couldn't be read. The automatic recovery copy was restored."
+msgstr ""
+
+msgctxt "#30074"
+msgid "That item no longer exists."
+msgstr ""
+
+msgctxt "#30076"
+msgid "Separate multiple values with /"
+msgstr ""
+
+msgctxt "#30077"
+msgid "Edit Value"
+msgstr ""
+
+msgctxt "#30078"
+msgid "Window Name or ID"
+msgstr ""
+
+msgctxt "#30080"
+msgid "Choose an Image"
+msgstr ""
+
+msgctxt "#30081"
+msgid "%d properties"
+msgstr ""
+
+msgctxt "#30082"
+msgid "Choose the Folder Containing the Item"
+msgstr ""
+
+msgctxt "#30083"
+msgid "Content Type"
+msgstr ""
+
+msgctxt "#30084"
+msgid "Automatic"
+msgstr ""
+
+msgctxt "#30085"
+msgid "Movies"
+msgstr ""
+
+msgctxt "#30086"
+msgid "TV Shows"
+msgstr ""
+
+msgctxt "#30087"
+msgid "Seasons"
+msgstr ""
+
+msgctxt "#30088"
+msgid "Episodes"
+msgstr ""
+
+msgctxt "#30089"
+msgid "Music Videos"
+msgstr ""
+
+msgctxt "#30090"
+msgid "Songs"
+msgstr ""
+
+msgctxt "#30091"
+msgid "Albums"
+msgstr ""
+
+msgctxt "#30092"
+msgid "Artists"
+msgstr ""
+
+msgctxt "#30093"
+msgid "Files"
+msgstr ""
+
+msgctxt "#30094"
+msgid "That Kodi favorite no longer exists."
+msgstr ""
+
+msgctxt "#30095"
+msgid "Go to Source"
+msgstr ""
+
+msgctxt "#30096"
+msgid "There's no source location for this favorite."
+msgstr ""
+
+msgctxt "#30097"
+msgid "Not set"
+msgstr ""
+
+msgctxt "#30100"
+msgid "Title"
+msgstr ""
+
+msgctxt "#30101"
+msgid "Original Title"
+msgstr ""
+
+msgctxt "#30102"
+msgid "TV Show Title"
+msgstr ""
+
+msgctxt "#30103"
+msgid "Plot"
+msgstr ""
+
+msgctxt "#30104"
+msgid "Plot Outline"
+msgstr ""
+
+msgctxt "#30105"
+msgid "Tagline"
+msgstr ""
+
+msgctxt "#30106"
+msgid "Year"
+msgstr ""
+
+msgctxt "#30107"
+msgid "Genre"
+msgstr ""
+
+msgctxt "#30108"
+msgid "Studio"
+msgstr ""
+
+msgctxt "#30109"
+msgid "Director"
+msgstr ""
+
+msgctxt "#30110"
+msgid "Writer"
+msgstr ""
+
+msgctxt "#30111"
+msgid "MPAA Rating"
+msgstr ""
+
+msgctxt "#30112"
+msgid "Rating"
+msgstr ""
+
+msgctxt "#30113"
+msgid "Votes"
+msgstr ""
+
+msgctxt "#30114"
+msgid "Duration (Seconds)"
+msgstr ""
+
+msgctxt "#30115"
+msgid "Season"
+msgstr ""
+
+msgctxt "#30116"
+msgid "Episode"
+msgstr ""
+
+msgctxt "#30117"
+msgid "Artist"
+msgstr ""
+
+msgctxt "#30118"
+msgid "Album"
+msgstr ""
+
+msgctxt "#30119"
+msgid "Track Number"
+msgstr ""
+
+msgctxt "#30120"
+msgid "Trailer"
+msgstr ""
+
+msgctxt "#30121"
+msgid "IMDb Number"
+msgstr ""
+
+msgctxt "#30122"
+msgid "Media Type"
+msgstr ""
+
+msgctxt "#30123"
+msgid "Database ID"
+msgstr ""
+
+msgctxt "#30200"
+msgid "General"
+msgstr ""
+
+msgctxt "#30201"
+msgid "Display"
+msgstr ""
+
+msgctxt "#30202"
+msgid "Use add-on fanart as fallback"
+msgstr ""
+
+msgctxt "#30203"
+msgid "MetaFave listings, folders and entries without their own fanart show the MetaFave fanart instead of the skin's fallback."
+msgstr ""
+
+msgctxt "#30204"
+msgid "Show Kodi Favorites"
+msgstr ""
+
+msgctxt "#30205"
+msgid "Show the Kodi Favorites row at the top level of MetaFave."
+msgstr ""
+
+msgctxt "#30206"
+msgid "Default content type for new folders"
+msgstr ""
+
+msgctxt "#30207"
+msgid "Content type given to newly created folders. Automatic follows the folder's items. Each folder can still be changed with Content Type."
+msgstr ""
+
+msgctxt "#30208"
+msgid "Show confirmation notifications"
+msgstr ""
+
+msgctxt "#30209"
+msgid "Show a notification after adding, copying, deleting or saving. Error messages are always shown."
+msgstr ""
+
+msgctxt "#30224"
+msgid "Folders"
+msgstr ""
+
+msgctxt "#30130"
+msgid "Move to Top"
+msgstr ""
+
+msgctxt "#30131"
+msgid "Move to Bottom"
+msgstr ""
+
+msgctxt "#30132"
+msgid "Move to Folder"
+msgstr ""
+
+msgctxt "#30133"
+msgid "Create Folder Inside"
+msgstr ""
+
+msgctxt "#30134"
+msgid "Moved to %s"
+msgstr ""
+
+msgctxt "#30225"
+msgid "Show library watched/progress indicators"
+msgstr ""
+
+msgctxt "#30226"
+msgid "Read current watched status and playback progress for Kodi-library movies, TV shows, episodes and music videos. Indicator appearance depends on your skin and widget layout. Updates appear when the listing or widget refreshes. The optional MDBList source has its own setting."
+msgstr ""
+
+msgctxt "#30124"
+msgid "Movie / TV-show TMDb ID"
+msgstr ""
+
+msgctxt "#30125"
+msgid "Episode TMDb ID"
+msgstr ""
+
+msgctxt "#30126"
+msgid "Episode TVDB ID"
+msgstr ""
+
+msgctxt "#30127"
+msgid "Parent show IMDb ID"
+msgstr ""
+
+msgctxt "#30128"
+msgid "Parent show TMDb ID"
+msgstr ""
+
+msgctxt "#30227"
+msgid "Show MDBList watched and progress indicators"
+msgstr ""
+
+msgctxt "#30228"
+msgid "Read cached MDBList status when no local-library result is available. Requires your own API key; the MDBList add-on is not required. Skin dependent. Refreshes in the background about every 15 minutes while browsing; reopen the folder or refresh the widget to see updates."
+msgstr ""
+
+msgctxt "#30229"
+msgid "MDBList API key"
+msgstr ""
+
+msgctxt "#30230"
+msgid "Your personal key from mdblist.com/preferences/. Only reads watched history and paused progress. Does not report playback or change tracking data. This key is saved in Kodi settings."
+msgstr ""
+
+msgctxt "#30135"
+msgid "TV-show TVDB ID"
+msgstr ""
+
+msgctxt "#30140"
+msgid "From Items in This Folder"
+msgstr ""
+
+msgctxt "#30141"
+msgid "Use as Artwork for %s"
+msgstr ""
+
+msgctxt "#30142"
+msgid "%s - replaces current"
+msgstr ""
+
+msgctxt "#30143"
+msgid "%s - already in use"
+msgstr ""
+
+msgctxt "#30144"
+msgid "This entry has no artwork that suits a folder."
+msgstr ""
+
+msgctxt "#30145"
+msgid "%d images"
+msgstr ""
+
+msgctxt "#30300"
+msgid "Copy list contents"
+msgstr ""
+
+msgctxt "#30301"
+msgid "Add folder shortcut"
+msgstr ""
+
+msgctxt "#30302"
+msgid "Copy this page"
+msgstr ""
+
+msgctxt "#30303"
+msgid "Copy this and following pages"
+msgstr ""
+
+msgctxt "#30304"
+msgid "Copy into folder"
+msgstr ""
+
+msgctxt "#30308"
+msgid "Reading list contents..."
+msgstr ""
+
+msgctxt "#30309"
+msgid "Reading page %d — %d items collected"
+msgstr ""
+
+msgctxt "#30310"
+msgid "The source list could not be read. Nothing was saved."
+msgstr ""
+
+msgctxt "#30311"
+msgid "Added %d items. Skipped %d duplicates and %d navigation or empty entries.[CR][CR]Folder: %s"
+msgstr ""
+
+msgctxt "#30312"
+msgid "This source has a next-page link that MetaFave cannot follow reliably."
+msgstr ""
+
+msgctxt "#30313"
+msgid "Copy stopped because the source repeated a page or exceeded the import limit. Nothing was saved."
+msgstr ""
+
+msgctxt "#30314"
+msgid "Copy just this page instead?"
+msgstr ""
+
+msgctxt "#30315"
+msgid "No items were found to copy."
+msgstr ""
+
+msgctxt "#30319"
+msgid "Folders and list copying"
+msgstr ""
+
+msgctxt "#30320"
+msgid "Paginate folders"
+msgstr ""
+
+msgctxt "#30321"
+msgid "Items per page"
+msgstr ""
+
+msgctxt "#30322"
+msgid "Show this many saved entries per page, with Previous and Next page links. This does not limit how many items a folder stores. A folder can override this setting. Widgets follow the same limit unless the folder is set to Show all items."
+msgstr ""
+
+msgctxt "#30323"
+msgid "Folder pagination"
+msgstr ""
+
+msgctxt "#30324"
+msgid "Use global pagination settings"
+msgstr ""
+
+msgctxt "#30325"
+msgid "Show all items"
+msgstr ""
+
+msgctxt "#30326"
+msgid "Set items per page"
+msgstr ""
+
+msgctxt "#30327"
+msgid "Enter a whole number greater than zero."
+msgstr ""
+
+msgctxt "#30328"
+msgid "Next page (%d of %d)"
+msgstr ""
+
+msgctxt "#30329"
+msgid "Previous page (%d of %d)"
+msgstr ""
+
+msgctxt "#30330"
+msgid "Skip duplicates when copying lists"
+msgstr ""
+
+msgctxt "#30331"
+msgid "Skip items already in the destination folder or repeated in the copied list. Match reliable media identifiers or the exact saved destination, never the display name."
+msgstr ""
