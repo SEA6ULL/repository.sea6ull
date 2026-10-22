@@ -1,3 +1,13 @@
+## 1.0.73
+- Fix Library Radio playing only the station's first artist with shuffle on.
+- Library Radio: selecting the summary row now plays the station (Play All), as on every other list page, and selecting a song plays the station from that song.
+- Artist Radio stations now update over time: a finished station is kept for a day, then the next visit (or Play from Favorite Radio) builds a new mix. Save Snapshot to My Playlists keeps a mix for good.
+- Library Radio: when Last.fm and Deezer can't be reached for similar artists, a notice says the station has only the seed artist's songs.
+- Songs in Your Library (artist page) now has a summary row with Play All.
+- The shuffle button is read from the player itself (Kodi's JSON-RPC Playlist.GetProperties has no "shuffled" property, so the previous check always fell back to a guess).
+- Christmas songs are kept in downloads, an artist's own library songs, Christmas Library Radio stations, and Recent copies of My Playlists and Christmas lists.
+- Songs that name their own file (Library Radio, library songs, downloads, songs added to My Playlists from your library) play that exact file instead of being matched again by artist and title.
+
 ## 1.0.72
 - Now Playing: while a Rotation list is playing, Rotation's home screen starts with "Now Playing · <list name>".
 - Recent Radio & Playlists, at the top of My Music: the last 10 radio stations and playlists you played. Context menu: Play, Make a Fresh Mix (Artist Radio), Play a Fresh Mix (Library Radio) or Open Latest Version (charts and playlists), Save Snapshot to My Playlists, and Remove from Recent.

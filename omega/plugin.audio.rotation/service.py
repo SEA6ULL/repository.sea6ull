@@ -25,16 +25,27 @@ _LOOKAHEAD_STOPPED_AT = 0.0
 
 
 def _player_shuffled():
-    """Kodi's music shuffle flag (the player's shuffle button)."""
+    """Kodi's music shuffle flag (the player's shuffle button).
+
+    Same reading as the plugin's: the audio player while it plays, otherwise
+    Kodi's music playlist. Playlist.GetProperties has no "shuffled" property.
+    """
     try:
-        result = json.loads(xbmc.executeJSONRPC(json.dumps({
-            "jsonrpc": "2.0", "id": 1, "method": "Playlist.GetProperties",
-            "params": {"playlistid": 0, "properties": ["shuffled"]}}))).get("result") or {}
-        if "shuffled" in result:
-            return bool(result["shuffled"])
+        players = json.loads(xbmc.executeJSONRPC(json.dumps({
+            "jsonrpc": "2.0", "id": 1, "method": "Player.GetActivePlayers"})))
+        for player in players.get("result") or []:
+            if player.get("type") != "audio":
+                continue
+            result = json.loads(xbmc.executeJSONRPC(json.dumps({
+                "jsonrpc": "2.0", "id": 1, "method": "Player.GetProperties",
+                "params": {"playerid": player.get("playerid"),
+                           "properties": ["shuffled"]}}))).get("result") or {}
+            if "shuffled" in result:
+                return bool(result["shuffled"])
     except Exception:
         pass
-    return bool(xbmc.getCondVisibility("Playlist.IsRandom"))
+    return bool(xbmc.getCondVisibility("Playlist.IsRandom(music)") or
+                xbmc.getCondVisibility("Playlist.IsRandom"))
 
 
 def _maintain_playback_lookahead():

@@ -2610,6 +2610,9 @@ def download_tracks(key):
     rows = playable_results(job)
     report = plugin.url_for(download_report, key)
     play = plugin.url_for(download_play, key)
+    # Selecting a song plays the download from that song through Rotation's
+    # queue, as on every other list page.
+    play_from = _playlist_play_url("download", key, job["label"])
     # Same menu as any other album or playlist page. Report, export, scan and
     # removal live on the download's own row in Downloads.
     actions = [("Play All", "RunPlugin(%s)" % play)] if rows else []
@@ -2639,7 +2642,10 @@ def download_tracks(key):
                     favorites_api, "artist", _playlist_artist_url(entry), artist,
                     thumb=_artist_artwork(artist).get("thumb", ""), artist=artist)
             li.addContextMenuItems(track_actions, replaceItems=False)
-            xbmcplugin.addDirectoryItem(plugin.handle, row["file"], li, False)
+            url = play_from + "&start=" + _file_start_key(row["file"])
+            li.setPath(url)
+            li.setProperty("IsPlayable", "false")
+            xbmcplugin.addDirectoryItem(plugin.handle, url, li, False)
         else:
             title = "%s — %s" % (entry.get("artist", ""), entry.get("title", ""))
             li = xbmcgui.ListItem("[COLOR gray]%s[/COLOR]" % title)
@@ -2669,22 +2675,40 @@ def download_tracks(key):
     xbmcplugin.endOfDirectory(plugin.handle, cacheToDisc=False)
 
 
+def _download_entries(key):
+    """A download's playable files as list rows, each naming its own file,
+    with the same album and cover its Downloads page shows."""
+    job = _downloads().get(key)
+    if not job:
+        return []
+    compilation = (not (job["album"] or job.get("single")) and
+                   job["options"]["organization"] == "compilation")
+    whole = job.get("album") or job.get("single")
+    cover = download_cover(_downloads(), job)
+    entries = []
+    for row in playable_results(job):
+        source = job["entries"][row["position"] - 1]
+        entry = dict(source, artist=row["artist"], title=row["title"], file=row["file"])
+        if row.get("duration"):
+            entry["duration"] = row["duration"]
+        if compilation:
+            entry["album"] = job["label"]
+            entry["album_artist"] = "Various Artists"
+        entry["cover"] = (cover if whole or compilation else
+                          source.get("cover") or source.get("image") or cover) or ""
+        entries.append(entry)
+    return entries
+
+
 @plugin.route("/downloads/play/<key>")
 def download_play(key):
     job = _downloads().get(key)
     if not job:
         return
-    rows = playable_results(job)
-    if not rows:
+    if not playable_results(job):
         xbmcgui.Dialog().ok("Downloads", "No downloaded or library files are available for playback.")
         return
-    playlist = xbmc.PlayList(xbmc.PLAYLIST_MUSIC)
-    playlist.clear()
-    compilation = not (job["album"] or job.get("single")) and job["options"]["organization"] == "compilation"
-    art = _download_art(job)
-    for row in rows:
-        playlist.add(row["file"], _download_item(job, row, art))
-    _start_in_player_order(playlist)
+    _play_playlist("download", key, job["label"])
 
 
 @plugin.route("/downloads/scan/<key>")
@@ -4270,33 +4294,47 @@ def _artist_local_songs(name):
     return result
 
 
+def _artist_library_entries(name):
+    """An artist's library songs in album order, as their page lists them."""
+    return sorted((dict(song) for song in _artist_local_songs(name)),
+                  key=lambda song: (song.get("album", "").casefold(),
+                                    int(song.get("track") or 0),
+                                    song.get("title", "").casefold()))
+
+
+def _artist_library_label(name):
+    return "%s — Library Songs" % name
+
+
 @plugin.route("/artists/library_songs")
 def artists_library_songs():
     name = unquote(plugin.args.get("artist", [""])[0])
-    songs = sorted(_artist_local_songs(name),
-                   key=lambda song: (song.get("album", "").casefold(),
-                                     int(song.get("track") or 0),
-                                     song.get("title", "").casefold()))
+    songs = _artist_library_entries(name)
+    label = _artist_library_label(name)
+    play_url = _playlist_play_url("artist_library", name, label)
+    context = [("Play All", "RunPlugin(%s)" % play_url)]
+    if songs:
+        _add_library_radio_summary(
+            songs, artwork=_playlist_artist_summary_art(name), context_menu=context,
+            play_url=play_url, heading="Songs in Your Library")
     for position, song in enumerate(songs, 1):
         li = _playlist_listitem(song, position)
         li.addContextMenuItems(
-            _user_playlist_track_context({}, song), replaceItems=False)
-        xbmcplugin.addDirectoryItem(plugin.handle, song["file"], li, False)
+            context + _user_playlist_track_context({}, song), replaceItems=False)
+        url = play_url + "&start=" + _file_start_key(song["file"])
+        li.setPath(url)
+        li.setProperty("IsPlayable", "false")
+        xbmcplugin.addDirectoryItem(plugin.handle, url, li, False)
     _set_view("songs")
     xbmcplugin.endOfDirectory(plugin.handle)
 
 
 @plugin.route("/artists/library_play")
 def artists_library_play():
+    """Play Library Songs: the artist's page list, through Rotation's Play."""
     name = unquote(plugin.args.get("artist", [""])[0])
-    songs = _artist_local_songs(name)
-    playlist = xbmc.PlayList(xbmc.PLAYLIST_MUSIC)
-    playlist.clear()
-    for position, song in enumerate(songs, 1):
-        playlist.add(song["file"], _playlist_listitem(song, position))
-    if playlist.size():
-        _start_in_player_order(
-            playlist, force_shuffle=plugin.args.get("shuffle", ["0"])[0] == "1")
+    _play_playlist("artist_library", name, _artist_library_label(name),
+                   force_shuffle=plugin.args.get("shuffle", ["0"])[0] == "1")
 
 
 @plugin.route("/artists/top_tracks")
@@ -4786,7 +4824,11 @@ def favorites(kind):
                 ("Remove from %s" % list_name, "RunPlugin(%s)" % remove_url),
                 reorder_item,
             ])
-            directory_items.append((f["url"], li, True))
+            # A Library Radio favorite opens a new mix on every visit.
+            open_url = (_library_radio_folder_url(library_radio[0], library_radio[1],
+                                                  _new_library_radio_build())
+                        if library_radio else f["url"])
+            directory_items.append((open_url, li, True))
         xbmcplugin.addDirectoryItems(plugin.handle, directory_items, len(directory_items))
         _set_view("albums")
         xbmcplugin.endOfDirectory(plugin.handle, cacheToDisc=False)
@@ -5050,6 +5092,7 @@ def shuffle_favorites():
         playlist.add(url, li)
 
     if playlist.size() > 0:
+        _end_rotation_queue()
         xbmc.Player().play(playlist)
     else:
         xbmcgui.Dialog().notification(
@@ -5182,6 +5225,24 @@ def _is_christmas_track(track):
     return bool(_CHRISTMAS_TEXT.search(text))
 
 
+def _allows_christmas(kind, arg=""):
+    """Whether a list may contain Christmas songs: lists the user made or
+    chose (My Playlists, downloads, an artist's own songs) and Christmas
+    selections. A Recent copy follows the list it was played from."""
+    if kind == "recent":
+        row = _recent_get(arg) or {}
+        return bool(row) and row.get("kind") != "recent" and _allows_christmas(
+            row.get("kind"), row.get("arg", ""))
+    if kind in ("user", "download", "artist_library"):
+        return True
+    if kind == "tag":
+        return _is_christmas_selection(arg)
+    if kind == "library_radio":
+        mode, _, value = str(arg).partition("|")
+        return mode == "genre" and _is_christmas_selection(value)
+    return False
+
+
 def _without_christmas(tracks, allow=False):
     if allow:
         return list(tracks)
@@ -5222,15 +5283,18 @@ def _balanced_local_tracks(songs, limit):
     return result
 
 
-def _library_radio_tracks(mode, value=""):
-    """Build a local-only radio selection from Rotation's Kodi library index."""
+def _build_library_radio(mode, value=""):
+    """Return (tracks, complete). complete is False when an artist station
+    could not reach Last.fm or Deezer for similar artists, so it holds only
+    the seed artist's songs and should not be kept."""
+    complete = True
     index = _library()
     index.build()
     limit = _playlist_limit()
     allow_christmas = mode == "genre" and _is_christmas_selection(value)
     songs = _without_christmas(index.songs, allow=allow_christmas)
     if not songs:
-        return []
+        return [], complete
 
     if mode == "artist":
         local = {}
@@ -5248,6 +5312,7 @@ def _library_radio_tracks(mode, value=""):
             xbmc.log("[rotation] Library Radio relationship lookup failed for %r: %s"
                      % (value, exc), xbmc.LOGWARNING)
             names = []
+            complete = False
         related = []
         seen_files = {song["file"] for song in seed_pool}
         for name in names:
@@ -5264,22 +5329,22 @@ def _library_radio_tracks(mode, value=""):
             used = {song["file"] for song in result}
             remainder = [song for song in seed_pool if song["file"] not in used]
             result.extend(remainder[:limit - len(result)])
-        return result[:limit]
+        return result[:limit], complete
 
     if mode == "genre":
         wanted = value.casefold()
         matches = [song for song in songs
                    if any(g.casefold() == wanted for g in _song_genres(song))]
-        return _balanced_local_tracks(matches, limit)
+        return _balanced_local_tracks(matches, limit), complete
 
     if mode == "decade":
         try:
             start = int(value)
         except (TypeError, ValueError):
-            return []
+            return [], complete
         matches = [song for song in songs
                    if start <= int(song.get("year") or 0) <= start + 9]
-        return _balanced_local_tracks(matches, limit)
+        return _balanced_local_tracks(matches, limit), complete
 
     if mode == "rediscover":
         # Empty last-played values sort first, followed by low play counts and
@@ -5290,17 +5355,98 @@ def _library_radio_tracks(mode, value=""):
             key=lambda song: (int(song.get("playcount") or 0),
                               song.get("lastplayed", "") or "", random.random())
         )[:max(limit * 3, limit)]
-        return _balanced_local_tracks(candidates, limit)
+        return _balanced_local_tracks(candidates, limit), complete
 
     if mode == "shuffle":
-        return _balanced_local_tracks(songs, limit)
-    return []
+        return _balanced_local_tracks(songs, limit), complete
+    return [], complete
 
 
-def _library_radio_folder_url(mode, value=""):
-    return (plugin.url_for(library_radio_mix)
-            + "?mode=" + quote(mode, safe="")
-            + "&value=" + quote(str(value), safe=""))
+def _library_radio_folder_url(mode, value="", build=""):
+    """The station page. build marks one visit (see _library_radio_station);
+    every link that opens a station gets a new one, so it opens a new mix."""
+    url = (plugin.url_for(library_radio_mix)
+           + "?mode=" + quote(mode, safe="")
+           + "&value=" + quote(str(value), safe=""))
+    if build:
+        url += "&build=" + quote(str(build), safe="")
+    return url
+
+
+def _new_library_radio_build():
+    return str(int(time.time() * 1000))
+
+
+# The mixes of recent station visits, so a page keeps its list on refresh and
+# Back. Not a library of stations: old visits drop off.
+LIBRARY_RADIO_FILE = os.path.join(USER_DATA_DIR, "library_radio_stations.json")
+LIBRARY_RADIO_MAX = 25
+_LIBRARY_RADIO_FIELDS = ("file", "artist", "title", "album", "albumartist", "duration",
+                         "year", "track", "genre", "genres", "thumb", "playcount",
+                         "lastplayed")
+
+
+def _library_radio_key(mode, value=""):
+    return "%s|%s" % (mode, value)
+
+
+def _load_library_radio_stations():
+    try:
+        with open(LIBRARY_RADIO_FILE, "r", encoding="utf-8") as stream:
+            stations = json.load(stream)
+        return stations if isinstance(stations, dict) else {}
+    except (OSError, ValueError, TypeError):
+        return {}
+
+
+def _save_library_radio_station(key, tracks, complete):
+    stations = _load_library_radio_stations()
+    stations[key] = {
+        "built": int(time.time() * 1000), "complete": bool(complete),
+        "tracks": [{field: song[field] for field in _LIBRARY_RADIO_FIELDS
+                    if song.get(field) not in (None, "")} for song in tracks]}
+    newest = sorted(stations, key=lambda k: stations[k].get("built", 0),
+                    reverse=True)[:LIBRARY_RADIO_MAX]
+    try:
+        os.makedirs(USER_DATA_DIR, exist_ok=True)
+        with open(LIBRARY_RADIO_FILE + ".tmp", "w", encoding="utf-8") as stream:
+            json.dump({k: stations[k] for k in newest}, stream, ensure_ascii=False)
+        os.replace(LIBRARY_RADIO_FILE + ".tmp", LIBRARY_RADIO_FILE)
+    except OSError as exc:
+        xbmc.log("[rotation] Could not save Library Radio station: %s" % exc,
+                 xbmc.LOGWARNING)
+
+
+def _library_radio_station(mode, value="", build=""):
+    """The station's song list. Like a streaming service's radio, every
+    visit makes a new mix; Snapshot keeps one in My Playlists.
+
+    build identifies one visit: the station page passes it to its Play All,
+    summary row and song rows, so they play the list that page shows, and a
+    refresh of that page (or coming Back to it) keeps it. Each visit's mix is
+    kept under its own build, so a newer visit never changes an older page.
+    Without build (Play from a favorite's or Recent's menu) a new mix plays.
+    """
+    key = "%s|%s" % (_library_radio_key(mode, value), build) if build else ""
+    saved = _load_library_radio_stations().get(key) if key else None
+    if saved:
+        index = _library()
+        index.build()
+        present = {song["file"] for song in index.songs if song.get("file")}
+        tracks = [dict(song) for song in saved.get("tracks", [])
+                  if song.get("file") in present]
+        if tracks:
+            return tracks
+    tracks, complete = _build_library_radio(mode, value)
+    if tracks and key:
+        _save_library_radio_station(key, tracks, complete)
+    if not complete:
+        xbmcgui.Dialog().notification(
+            plugin.name,
+            "Similar artists are unavailable - this station has only %s. "
+            "Try a fresh mix later." % value,
+            xbmcgui.NOTIFICATION_WARNING, 6000)
+    return tracks
 
 
 def _library_radio_label(mode, value=""):
@@ -5329,15 +5475,24 @@ def _library_radio_favorite_spec(favorite):
     return (query.get("mode", [""])[0], query.get("value", [""])[0])
 
 
-def _library_radio_context(mode, value, label, include_favorite=True):
-    base = (plugin.url_for(library_radio_play)
-            + "?mode=" + quote(mode, safe="")
-            + "&value=" + quote(str(value), safe="")
-            + "&label=" + quote(label, safe=""))
+def _library_radio_play_url(mode, value, label, build=""):
+    """Play a station: the page's own mix with build, otherwise a new mix."""
+    url = _playlist_play_url("library_radio", _library_radio_key(mode, value), label)
+    return url + ("&build=" + quote(str(build), safe="") if build else "")
+
+
+def _library_radio_context(mode, value, label, include_favorite=True, build=""):
     context = [
-        ("Play All", "RunPlugin(%s)" % base),
+        ("Play All", "RunPlugin(%s)" % _library_radio_play_url(mode, value, label, build)),
     ]
+    if build:
+        context.append(("Save Snapshot to My Playlists", "RunPlugin(%s)" % _user_playlist_add_url(
+            "snapshot", kind="library_radio", arg=_library_radio_key(mode, value),
+            label=label, build=build)))
     if include_favorite:
+        context.append(("Make a Fresh Mix", "Container.Update(%s,replace)" %
+                        _library_radio_folder_url(mode, value,
+                                                  _new_library_radio_build())))
         url = _library_radio_folder_url(mode, value)
         artist = str(value) if mode == "artist" else ""
         thumb = (library_artist_art(art_artist_name(artist)).get("thumb", "")
@@ -5363,7 +5518,7 @@ def _navigation_request_is_current():
 def _open_library_radio(mode, value=""):
     if plugin.handle >= 0:
         xbmcplugin.endOfDirectory(plugin.handle, succeeded=False, cacheToDisc=False)
-    target = _library_radio_folder_url(mode, value)
+    target = _library_radio_folder_url(mode, value, _new_library_radio_build())
     url = plugin.url_for(library_radio_open) + "?target=" + quote(target, safe="")
     url += _navigation_origin_query()
     _schedule_playlist_action(url, "RotationLibraryRadioOpen")
@@ -5384,10 +5539,12 @@ def _user_playlist_track(entry, song=None, cover=""):
 
 
 def _user_playlist_add_url(scope, entry=None, kind="", arg="", label="",
-                           artist=""):
+                           artist="", build=""):
     entry = entry or {}
     values = {
         "scope": scope, "kind": kind, "arg": str(arg), "label": label,
+        # Library Radio: snapshot the mix of that page's visit, not a new one.
+        "build": build,
         "artist": artist or entry.get("artist", ""),
         "title": entry.get("title", ""), "album": entry.get("album", ""),
         "album_artist": entry.get("album_artist", ""),
@@ -5461,7 +5618,8 @@ def _snapshot_default_name(store, kind, arg, label):
     existing = {str(row.get("name") or "").casefold() for row in store.list()}
     # Personalized/generated lists describe a moment in time. Named provider
     # playlists retain their clean published title unless that title exists.
-    candidate = dated if kind == "for_you" or base.casefold() in existing else base
+    candidate = (dated if kind in ("for_you", "library_radio") or base.casefold() in existing
+                 else base)
     if candidate.casefold() not in existing:
         return candidate
     number = 2
@@ -5504,7 +5662,7 @@ def _playlist_management_context(playlist_id):
            + "?playlist_id=" + quote(playlist_id, safe=""))
     return [("Edit Playlist", "RunPlugin(%s)" % url)]
 
-def _playlist_entries(kind, arg=""):
+def _playlist_entries(kind, arg="", build=""):
     """
     Fetch provider entries for a playlist spec.
 
@@ -5532,10 +5690,21 @@ def _playlist_entries(kind, arg=""):
         entries = source.tag_tracks(arg, limit=limit)
     elif kind == "radio":
         snapshot = source.cache.get_stale(_radio_cache_key(arg)) or {}
-        if snapshot.get("complete"):
+        if _radio_snapshot_current(snapshot):
             entries = snapshot.get("entries", [])
         else:
-            entries = source.artist_radio(arg, limit=limit)
+            try:
+                entries = source.artist_radio(arg, limit=limit)
+            except ProviderError:
+                # Keep playing the last full station while providers are down.
+                if not snapshot.get("complete"):
+                    raise
+                entries = snapshot.get("entries", [])
+            else:
+                if entries:
+                    # The station page shows what was just played.
+                    source.cache.put(_radio_cache_key(arg), {
+                        "entries": entries, "complete": True, "built": time.time()})
     elif kind == "user":
         entries = (_user_playlists().get(arg).get("tracks", []))
     elif kind == "for_you":
@@ -5543,13 +5712,39 @@ def _playlist_entries(kind, arg=""):
     elif kind == "recent":
         # The exact list that was played, not a regenerated one.
         entries = [dict(entry) for entry in (_recent_get(arg) or {}).get("entries", [])]
+    elif kind == "library_radio":
+        # With build: the mix its page shows. Without: a new mix.
+        mode, _, value = str(arg).partition("|")
+        entries = _library_radio_station(mode, value, build)
+    elif kind == "artist_library":
+        entries = _artist_library_entries(arg)
+    elif kind == "download":
+        entries = _download_entries(arg)
     if kind in ("artist_top", "radio"):
         entries = _dedupe_track_entries(
             entries, min(50, limit) if kind == "artist_top" else limit)
     entries = _playlist_metadata_policy(entries)
     return _without_christmas(
-        entries, allow=(kind == "user" or
-                        (kind == "tag" and _is_christmas_selection(arg))))
+        entries, allow=_allows_christmas(kind, arg))
+
+
+def _playlist_play_url(kind, arg, label):
+    """Rotation's one way to start a list: Play All, a summary row, a song."""
+    return (plugin.url_for(playlists_play)
+            + "?kind=" + quote(kind, safe="")
+            + "&arg=" + quote(str(arg), safe="")
+            + "&label=" + quote(label or "", safe=""))
+
+
+def _file_start_key(path):
+    """start= value for a song row that names its own file."""
+    return "file-" + hashlib.sha1(path.encode("utf-8")).hexdigest()[:20]
+
+
+# Lists made only of files already on this system. They go through the same
+# Play path as every other list, minus provider artwork and the found-in-
+# library notice, which say nothing about local files.
+LOCAL_LIST_KINDS = ("library_radio", "artist_library", "download")
 
 
 def _playlist_play_context(kind, arg, label):
@@ -5558,10 +5753,7 @@ def _playlist_play_context(kind, arg, label):
     There is no Shuffle All: order follows the player's shuffle button, as in
     Kodi's music library.
     """
-    base = (plugin.url_for(playlists_play)
-            + "?kind=" + quote(kind, safe="")
-            + "&arg="  + quote(str(arg), safe="")
-            + "&label=" + quote(label, safe=""))
+    base = _playlist_play_url(kind, arg, label)
     items = [
         ("Play All", "RunPlugin({0})".format(base)),
     ]
@@ -5717,14 +5909,26 @@ def _playlist_artist_url(entry):
 
 def _playlist_tracks(entries, index, allow_christmas=False):
     """Resolve locally without separating or reordering the provider's tracks."""
+    by_file = None
     for entry in entries:
-        if not entry.get("artist") or not entry.get("title"):
+        local_file = entry.get("file", "")
+        if not local_file and (not entry.get("artist") or not entry.get("title")):
             continue
-        song = index.resolve(entry["artist"], entry["title"],
-                             album=entry.get("album", ""),
-                             threshold=_match_threshold(),
-                             allow_any_artist=_allow_any_artist()) if index.size else None
-        if not song and stable_file(entry.get("file", "")):
+        song = None
+        if local_file:
+            # Library Radio, an artist's library songs, downloads and their
+            # Recent copies name the exact Kodi file. Matching those by
+            # artist and title could pick another album's copy of the song.
+            if by_file is None:
+                by_file = {row["file"]: row for row in index.songs
+                           if row.get("file")} if index.size else {}
+            song = by_file.get(local_file)
+        if not song and entry.get("artist") and entry.get("title"):
+            song = index.resolve(entry["artist"], entry["title"],
+                                 album=entry.get("album", ""),
+                                 threshold=_match_threshold(),
+                                 allow_any_artist=_allow_any_artist()) if index.size else None
+        if not song and stable_file(local_file):
             song = dict(entry, thumb=entry.get("cover", ""))
         if song:
             song = dict(song)
@@ -5742,8 +5946,12 @@ def _dedupe_resolved_tracks(tracks):
     seen_identity = set()
     seen_files = set()
     for song, entry in tracks:
-        identity = track_identity_key(entry.get("artist", ""),
-                                      entry.get("title", ""))
+        # A row that names its own file is a distinct local recording: the
+        # same song from two albums on an artist's page both stay.
+        identity = (("file", os.path.normcase(entry["file"].strip()))
+                    if entry.get("file") else
+                    track_identity_key(entry.get("artist", ""),
+                                       entry.get("title", "")))
         if identity in seen_identity:
             continue
         if song:
@@ -6862,31 +7070,30 @@ def _player_shuffled():
     Rotation follows it exactly like Kodi's library does: shuffle on means
     random order, off means playlist order. Kodi keeps the flag on the music
     playlist across clears, so it can be read before anything is queued.
+
+    Playlist.GetProperties has no "shuffled" property, so asking it always
+    failed quietly. The audio player reports the flag while it plays; with
+    nothing playing, Kodi's music playlist is asked directly, because the
+    plain Playlist.IsRandom only describes the playlist last played (video,
+    for instance).
     """
     try:
-        raw = xbmc.executeJSONRPC(json.dumps({
-            "jsonrpc": "2.0", "id": 1, "method": "Playlist.GetProperties",
-            "params": {"playlistid": xbmc.PLAYLIST_MUSIC,
-                       "properties": ["shuffled"]}}))
-        result = json.loads(raw).get("result") or {}
-        if "shuffled" in result:
-            return bool(result["shuffled"])
+        players = json.loads(xbmc.executeJSONRPC(json.dumps({
+            "jsonrpc": "2.0", "id": 1, "method": "Player.GetActivePlayers"})))
+        for player in players.get("result") or []:
+            if player.get("type") != "audio":
+                continue
+            result = json.loads(xbmc.executeJSONRPC(json.dumps({
+                "jsonrpc": "2.0", "id": 1, "method": "Player.GetProperties",
+                "params": {"playerid": player.get("playerid"),
+                           "properties": ["shuffled"]}}))).get("result") or {}
+            if "shuffled" in result:
+                return bool(result["shuffled"])
     except Exception as exc:
         xbmc.log("[rotation] Could not read player shuffle state: %s" % exc,
                  xbmc.LOGDEBUG)
-    return bool(xbmc.getCondVisibility("Playlist.IsRandom"))
-
-
-def _start_in_player_order(playlist, force_shuffle=False):
-    """Start a fully queued Kodi playlist in the order the player is set to.
-
-    Items must already be in playlist order. With shuffle on, Kodi's own
-    shuffle is applied (not a pre-shuffled insert), so turning shuffle off
-    mid-playback restores the real order, exactly as in the music library.
-    """
-    if force_shuffle or _player_shuffled():
-        playlist.shuffle()
-    xbmc.Player().play(playlist)
+    return bool(xbmc.getCondVisibility("Playlist.IsRandom(music)") or
+                xbmc.getCondVisibility("Playlist.IsRandom"))
 
 
 PREWARM_PROPERTY = "Rotation.PrewarmedStream"
@@ -6985,6 +7192,20 @@ def _take_prewarmed_stream(entry, session):
         seen.update(ids)
         window.setProperty(session_key, json.dumps(list(seen)[-200:]))
     return url
+
+
+def _end_rotation_queue():
+    """Forget the held-back queue of the list that was playing.
+
+    For playback started outside Rotation's Play: otherwise the background
+    service kept feeding the previous list's songs onto the new queue.
+    """
+    window = xbmcgui.Window(10000)
+    for name in ("Rotation.LookaheadSession", "Rotation.LookaheadBusy",
+                 "Rotation.QueueShuffled", "Rotation.QueueHasStreams",
+                 "Rotation.LookaheadRetryAt"):
+        window.clearProperty(name)
+    window.clearProperty(NOW_PLAYING_KEY)
 
 
 def _issue_row(state, url, row):
@@ -7132,6 +7353,13 @@ def _playlist_folder_url(kind, arg):
         return plugin.url_for(for_you_browse, str(arg))
     if kind == "recent":
         return plugin.url_for(recent_open) + "?id=" + str(arg)
+    if kind == "library_radio":
+        mode, _, value = str(arg).partition("|")
+        return _library_radio_folder_url(mode, value)
+    if kind == "artist_library":
+        return plugin.url_for(artists_library_songs) + "?artist=" + quote(str(arg), safe="")
+    if kind == "download":
+        return plugin.url_for(download_tracks, str(arg))
     return ""  # Search and radio routes have no stable directory URL.
 
 
@@ -7423,15 +7651,33 @@ def _add_playlist_summary(entries, tracks=None, availability_complete=False, art
     xbmcplugin.addDirectoryItem(plugin.handle, play_url, summary, False)
 
 
-def _add_library_radio_summary(tracks, artwork=None, context_menu=None):
-    """Describe a fully local mix without redundant target/availability text."""
-    summary = xbmcgui.ListItem("Library Radio: %s" % _playlist_summary(tracks))
+def _add_library_radio_summary(tracks, artwork=None, context_menu=None,
+                               play_url="", heading="Library Radio"):
+    """Describe a fully local list without redundant target/availability text.
+
+    Selecting it plays the list (Play All), as on every other list page."""
+    summary = xbmcgui.ListItem("%s: %s" % (heading, _playlist_summary(tracks)))
     summary.setLabel2("All tracks are in your Kodi music library")
     summary.setArt(artwork or _art("", FALLBACK_FANART, ICON_SONGS))
     if context_menu:
         summary.addContextMenuItems(context_menu, replaceItems=False)
     summary.setProperty("IsPlayable", "false")
-    xbmcplugin.addDirectoryItem(plugin.handle, _info_row_url(), summary, False)
+    url = play_url or _info_row_url()
+    summary.setPath(url)
+    xbmcplugin.addDirectoryItem(plugin.handle, url, summary, False)
+
+
+def _add_local_song_rows(tracks, play_url, context):
+    """Song rows of a local list. Selecting one plays the list from that song
+    through Rotation's queue, like a song on any other list page, instead of
+    Kodi playing the bare file on its own."""
+    for position, song in enumerate(tracks, 1):
+        li = _playlist_listitem(song, position)
+        li.addContextMenuItems(context, replaceItems=False)
+        url = play_url + "&start=" + _file_start_key(song["file"])
+        li.setPath(url)
+        li.setProperty("IsPlayable", "false")
+        xbmcplugin.addDirectoryItem(plugin.handle, url, li, False)
 
 
 @plugin.route("/noop")
@@ -7451,8 +7697,7 @@ def _render_playlist(kind, arg, heading, entries=None, building=False):
         entries = _playlist_entries(kind, arg)
     else:
         entries = _without_christmas(
-            entries, allow=(kind == "user" or
-                            (kind == "tag" and _is_christmas_selection(arg))))
+            entries, allow=_allows_christmas(kind, arg))
     if kind == "user":
         entries = [dict(entry, _user_position=index)
                    for index, entry in enumerate(entries)]
@@ -7468,8 +7713,7 @@ def _render_playlist(kind, arg, heading, entries=None, building=False):
 
     index = _library()
     index.build()
-    allow_christmas = (kind == "user" or
-                       (kind == "tag" and _is_christmas_selection(arg)))
+    allow_christmas = _allows_christmas(kind, arg)
     folder = _playlist_folder_url(kind, arg)
     listing_path = folder or _current_plugin_path()
     xbmcplugin.setProperty(plugin.handle, "Rotation.PlaylistLocation", listing_path)
@@ -8119,7 +8363,7 @@ def user_playlist_add():
     elif scope == "artist":
         entries = [_user_playlist_track({}, song) for song in _artist_local_songs(artist)]
     elif scope in ("album", "snapshot"):
-        entries = _playlist_entries(kind, arg)
+        entries = _playlist_entries(kind, arg, _route_arg("build"))
         index = _library()
         index.build()
         entries = [_user_playlist_track(entry, song)
@@ -8345,9 +8589,12 @@ def library_radio_root():
          "Local only", False),
         ("By Decade", plugin.url_for(library_radio_decade), ICON_TOP_SONGS,
          "Local only", False),
-        ("Rediscover Your Library", _library_radio_folder_url("rediscover"),
+        # Opening a station makes a new mix (see _library_radio_station).
+        ("Rediscover Your Library",
+         _library_radio_folder_url("rediscover", "", _new_library_radio_build()),
          ICON_FAVORITES, "Least played and least recently heard", True),
-        ("Shuffle All Music", _library_radio_folder_url("shuffle"),
+        ("Shuffle All Music",
+         _library_radio_folder_url("shuffle", "", _new_library_radio_build()),
          ICON_SHUFFLE, "Balanced across artists", True),
     ]
     for label, url, icon, detail, is_folder in items:
@@ -8355,7 +8602,7 @@ def library_radio_root():
         li.setLabel2(detail)
         li.setArt({"fanart": FANART, "icon": icon})
         xbmcplugin.addDirectoryItem(plugin.handle, url, li, is_folder)
-    xbmcplugin.endOfDirectory(plugin.handle)
+    xbmcplugin.endOfDirectory(plugin.handle, cacheToDisc=False)
 
 
 @plugin.route("/playlists/library_radio/artist")
@@ -8418,44 +8665,35 @@ def library_radio_open():
 def library_radio_mix():
     mode = unquote(plugin.args.get("mode", [""])[0])
     value = unquote(plugin.args.get("value", [""])[0])
+    # A link without a visit (an old shortcut) starts one here.
+    build = unquote(plugin.args.get("build", [""])[0]) or _new_library_radio_build()
     heading = _library_radio_label(mode, value)
-    tracks = _library_radio_tracks(mode, value)
+    tracks = _library_radio_station(mode, value, build)
     if not tracks:
         _notify_error("No local tracks found for this Library Radio station.")
         xbmcplugin.endOfDirectory(plugin.handle, succeeded=False)
         return
-    context = _library_radio_context(mode, value, heading)
+    play_url = _library_radio_play_url(mode, value, heading, build)
+    context = _library_radio_context(mode, value, heading, build=build)
     context += _export_context(heading, [dict(song, _local_file=song["file"]) for song in tracks])
     summary_art = (_playlist_artist_summary_art(value) if mode == "artist"
                    else _art("", FALLBACK_FANART, ICON_RADIO))
-    _add_library_radio_summary(tracks, artwork=summary_art, context_menu=context)
-    for position, song in enumerate(tracks, 1):
-        li = _playlist_listitem(song, position)
-        li.addContextMenuItems(context, replaceItems=False)
-        xbmcplugin.addDirectoryItem(plugin.handle, song["file"], li, False)
+    _add_library_radio_summary(tracks, artwork=summary_art, context_menu=context,
+                               play_url=play_url)
+    _add_local_song_rows(tracks, play_url, context)
     _set_view("songs")
     xbmcplugin.endOfDirectory(plugin.handle, cacheToDisc=False)
 
 
 @plugin.route("/playlists/library_radio/play")
 def library_radio_play():
+    """Make a fresh mix of a station and play it (Recent's "Play a Fresh Mix"
+    and older shortcuts). Plays through the same path as Play All."""
     mode = unquote(plugin.args.get("mode", [""])[0])
     value = unquote(plugin.args.get("value", [""])[0])
-    shuffle = plugin.args.get("shuffle", ["0"])[0] == "1"
-    tracks = _library_radio_tracks(mode, value)
-    playlist = xbmc.PlayList(xbmc.PLAYLIST_MUSIC)
-    playlist.clear()
-    for position, song in enumerate(tracks, 1):
-        playlist.add(song["file"], _playlist_listitem(song, position))
-    if playlist.size():
-        _start_in_player_order(playlist, force_shuffle=shuffle)
-        label = _route_arg("label") or "Library Radio"
-        recent_id = _remember_recent("library_radio", "%s|%s" % (mode, value), label, tracks)
-        _set_now_playing("library_radio", "%s|%s" % (mode, value), label,
-                         files=[song["file"] for song in tracks], recent_id=recent_id,
-                         first=tracks[0] if tracks else None)
-    else:
-        _notify_error("No local tracks found for this Library Radio station.")
+    label = _route_arg("label") or _library_radio_label(mode, value)
+    _play_playlist("library_radio", _library_radio_key(mode, value), label,
+                   force_shuffle=plugin.args.get("shuffle", ["0"])[0] == "1")
 
 
 @plugin.route("/playlists/top_tracks")
@@ -9035,6 +9273,22 @@ def playlists_radio_open():
         xbmc.executebuiltin("Container.Update(%s)" % _playlist_folder_url("radio", artist))
 
 
+# Artist Radio stations update over time, like a streaming service's radio:
+# a finished station is kept for a day, then the next visit builds a new mix.
+# Save Snapshot to My Playlists keeps one for good.
+RADIO_MAX_AGE = 24 * 3600
+
+
+def _radio_snapshot_current(snapshot):
+    """A finished station built less than RADIO_MAX_AGE ago. Stations saved
+    before build times were recorded count as old, so they update once."""
+    try:
+        built = float((snapshot or {}).get("built") or 0)
+    except (TypeError, ValueError):
+        built = 0
+    return bool((snapshot or {}).get("complete")) and 0 <= time.time() - built < RADIO_MAX_AGE
+
+
 def _radio_cache_key(artist):
     return "radio-mix-v2:%s:%s" % (artist.casefold(), _playlist_limit())
 
@@ -9081,7 +9335,10 @@ def playlists_radio_artist():
         xbmcgui.Dialog().notification(
             "Artist Radio", provider_error,
             xbmcgui.NOTIFICATION_WARNING, 5000)
-    building = not snapshot.get("complete") and not provider_error
+    building = not _radio_snapshot_current(snapshot) and not provider_error
+    if building and snapshot.get("complete"):
+        # A day-old station: build a new mix from scratch.
+        snapshot = {}
     _render_playlist("radio", artist, "%s Radio" % artist,
                      entries=snapshot.get("entries", []), building=building)
     if building and not window.getProperty(_playlist_scan_key(folder)):
@@ -9100,13 +9357,18 @@ def playlists_radio_build():
     key = _radio_cache_key(artist)
     folder = _playlist_folder_url("radio", artist)
     window = xbmcgui.Window(10000)
+    # The day-old station being replaced: restored if the new build fails, so
+    # an outage never leaves a partial station in its place.
+    previous = source.cache.get_stale(key) or {}
+    previous = previous if previous.get("complete") else None
     def progress(entries):
         source.cache.put(key, {"entries": entries, "complete": False})
         _safe_background_refresh(folder, "radio discovery progress")
     try:
         entries = source.artist_radio(artist, limit=_playlist_limit(),
                                       on_progress=progress)
-        source.cache.put(key, {"entries": entries, "complete": True})
+        source.cache.put(key, {"entries": entries, "complete": True,
+                               "built": time.time()})
         if source.last_failure:
             window.setProperty(
                 _radio_error_key(artist),
@@ -9118,11 +9380,15 @@ def playlists_radio_build():
                  (artist, exc), xbmc.LOGWARNING)
         window.setProperty(_radio_error_key(artist), exc.message)
         # Never replace a successful radio snapshot with an outage result.
+        if previous:
+            source.cache.put(key, previous)
     except Exception as exc:
         xbmc.log("[rotation] Artist radio build failed for %r: %s" % (artist, exc),
                  xbmc.LOGWARNING)
         window.setProperty(_radio_error_key(artist),
                            "Artist Radio could not be created.")
+        if previous:
+            source.cache.put(key, previous)
     finally:
         window.clearProperty(_playlist_scan_key(folder))
         xbmc.executebuiltin("CancelAlarm(RotationRadioPartial,silent)")
@@ -9174,19 +9440,29 @@ def playlists_play():
     """
     Resolve a provider playlist against Kodi and start its playable entries.
     """
-    kind = unquote(plugin.args.get("kind", [""])[0])
-    arg = unquote(plugin.args.get("arg", [""])[0])
-    label = unquote(plugin.args.get("label", ["Playlist"])[0])
-    # Order follows the player's shuffle button, as in Kodi's library. The
-    # old "&shuffle=1" argument is still honoured for saved shortcuts.
-    shuffle = (plugin.args.get("shuffle", ["0"])[0] == "1") or _player_shuffled()
-    # Set when a track row was selected: play this list from that track.
-    start_key = plugin.args.get("start", [""])[0]
+    _play_playlist(
+        unquote(plugin.args.get("kind", [""])[0]),
+        unquote(plugin.args.get("arg", [""])[0]),
+        unquote(plugin.args.get("label", ["Playlist"])[0]),
+        # The old "&shuffle=1" argument is still honoured for saved shortcuts.
+        force_shuffle=plugin.args.get("shuffle", ["0"])[0] == "1",
+        # Set when a track row was selected: play this list from that track.
+        start_key=plugin.args.get("start", [""])[0],
+        # Library Radio: the visit whose mix to play (see _library_radio_station).
+        build=plugin.args.get("build", [""])[0])
 
+
+def _play_playlist(kind, arg, label, force_shuffle=False, start_key="", build=""):
+    """Start any Rotation list: provider playlists, radio, albums, Recent,
+    Library Radio, an artist's library songs and downloads all come here, so
+    shuffle, starting from a chosen song, Now Playing and the background
+    queue behave the same everywhere."""
     if not kind:
         return
+    # Order follows the player's shuffle button, as in Kodi's library.
+    shuffle = force_shuffle or _player_shuffled()
 
-    entries = _playlist_entries(kind, arg)
+    entries = _playlist_entries(kind, arg, build)
     if not entries:
         xbmcgui.Dialog().notification(
             plugin.name, "No tracks found.", xbmcgui.NOTIFICATION_WARNING, 3000)
@@ -9217,8 +9493,7 @@ def playlists_play():
     if shuffle:
         entries = list(entries)
         random.shuffle(entries)
-    allow_christmas = (kind == "user" or
-                       (kind == "tag" and _is_christmas_selection(arg)))
+    allow_christmas = _allows_christmas(kind, arg)
     # Resolve library membership first, but publish streaming rows to Kodi only
     # after their URL passes a real preflight. The service keeps one verified
     # item ahead, avoiding decoder-failure and busy-dialog loops.
@@ -9244,7 +9519,8 @@ def playlists_play():
     # exists. Only the first item is promoted; the rest retain shuffled order.
     behind = []
     chosen_at = (next((i for i, row in enumerate(queued)
-                       if _prewarm_key(row[1]) == start_key), None)
+                       if _prewarm_key(row[1]) == start_key or
+                       (row[0] and _file_start_key(row[0]["file"]) == start_key)), None)
                  if start_key else None)
     if chosen_at is not None:
         if shuffle:
@@ -9357,6 +9633,8 @@ def playlists_play():
         label = row.get("label", label)
     _set_now_playing(kind, arg, label, session=session, recent_id=recent_id,
                      first=played_entries[0] if played_entries else None)
+    if kind in LOCAL_LIST_KINDS:
+        return
     _notify_playlist_count(len(tracks), len(entries))
     folder = _playlist_folder_url(kind, arg)
     _start_playlist_artwork(entries, tracks, folder, folder,
@@ -9415,8 +9693,7 @@ def playlists_scan():
         if checked % 10 == 0 and checked < total:
             _save_availability(cache)
     try:
-        allow_christmas = (kind == "user" or
-                           (kind == "tag" and _is_christmas_selection(arg)))
+        allow_christmas = _allows_christmas(kind, arg)
         tracks = _check_playlist_tracks(
             entries, index, label, on_progress=progress if folder else None,
             allow_christmas=allow_christmas,
